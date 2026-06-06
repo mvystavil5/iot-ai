@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(python:*)",
+      "Bash(ollama:*)",
+      "Bash(uvicorn:*)",
+      "Bash(pytest:*)",
+      "Bash(git:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Read(**)",
+      "Write(**)",
+      "Edit(**)"
+    ]
+  },
+  "agents": {
+    "defaultModel": "claude-sonnet-4-6",
+    "maxConcurrent": 4
+  },
+  "env": {
+    "PYTHONPATH": ".",
+    "LOG_LEVEL": "INFO"
+  }
+}

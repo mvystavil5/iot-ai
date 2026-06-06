@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"D:\\\\ai-setup\" -not -path \"*/\\\\.*\")",
+      "PowerShell(head *)",
+      "WebFetch(domain:docs.arduino.cc)"
+    ]
+  }
+}

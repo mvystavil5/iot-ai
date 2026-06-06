@@ -1,0 +1,32 @@
+# Agent routing and capability flags.
+agents:
+  ingestion:
+    enabled: true
+    trigger: [http_post, mqtt, batch_file]
+    output_topics: [knowledge_chunks]
+
+  knowledge_builder:
+    enabled: true
+    trigger: [knowledge_chunks]
+    output_topics: [store_updated]
+    reindex_on_startup: false
+
+  reasoner:
+    enabled: true
+    trigger: [user_query, agent_query]
+    output_topics: [beliefs]
+    escalate_to_explorer_below_confidence: 0.4
+    escalate_after_n_queries: 3
+
+  explorer:
+    enabled: true
+    trigger: [low_confidence_belief, belief_invalidated, schedule]
+    schedule_cron: "0 * * * *"    # run hypothesis generation every hour
+    output_topics: [experiments, labeled_examples]
+    max_concurrent_experiments: 2
+
+  trainer:
+    enabled: false                # enable when you have GPU / enough data
+    trigger: [labeled_examples_threshold, manual]
+    min_examples_to_train: 50
+    output_topics: [model_updated]

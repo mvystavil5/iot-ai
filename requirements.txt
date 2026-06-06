@@ -1,0 +1,34 @@
+# Core
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pyyaml>=6.0
+httpx>=0.27           # HTTP client used by serial_bridge and test client
+pyserial>=3.5         # STM32 co-processor serial bridge
+
+# Time-series storage
+# sqlite3 is stdlib; upgrade path:
+# timescale-vector / asyncpg for TimescaleDB
+
+# Vector store
+chromadb>=0.5
+# qdrant-client>=1.9   # uncomment for scale
+
+# Embeddings + LLM (local)
+ollama>=0.2           # Python client for Ollama
+
+# Embeddings + LLM (cloud fallback)
+anthropic>=0.30
+
+# Fine-tuning
+peft>=0.11
+transformers>=4.41
+datasets>=2.20
+torch>=2.3            # CPU-only by default; install torch+cu121 for GPU
+
+# Observability
+structlog>=24.2
+
+# Dev
+pytest>=8.2
+pytest-asyncio>=0.23

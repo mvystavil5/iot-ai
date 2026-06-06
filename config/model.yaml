@@ -1,0 +1,57 @@
+# Model and knowledge store configuration.
+# Swap backends here — no code changes needed.
+
+embedding:
+  model: nomic-embed-text        # Ollama-served; swap to text-embedding-3-small for prod
+  dim: 768
+  batch_size: 32
+
+vector_store:
+  backend: chromadb              # swap to qdrant for multi-node
+  path: ./data/chroma
+  collection: iot_knowledge
+  max_chunks: 50000
+  eviction_policy: oldest_not_referenced
+
+llm:
+  backend: ollama                # swap to claude-api for higher quality
+  model: smollm2:135m            # fits in 4 GB RAM (Arduino UNO Q); swap to phi3:mini or claude-haiku-4-5-20251001 for more capable hardware
+  temperature: 0.2
+  max_tokens: 512
+  system_prompt: >
+    You are a physical-world reasoning system analyzing IoT sensor data.
+    Answer concisely and always state your confidence (0.0–1.0).
+    Ground answers in the provided sensor context. Never hallucinate sensor values.
+
+rag:
+  top_k: 8
+  min_similarity: 0.3
+  rerank: false                  # set true to add cross-encoder reranking
+  recency_decay_hours: 24.0      # half-life for recency score; reduce for fast-changing sensors
+  confidence_weights:
+    coverage: 0.25               # fraction of top_k slots filled
+    similarity: 0.40             # mean cosine similarity of retrieved chunks
+    recency: 0.20                # exponential decay by chunk age
+    consistency: 0.15            # intra-sensor value agreement
+
+beliefs:
+  path: ./data/beliefs.jsonl
+  invalidation_threshold: 0.7   # new belief must have confidence > this to invalidate old
+
+lora:
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+  task_type: CAUSAL_LM
+
+training:
+  labeled_examples_path: ./data/labeled_examples.jsonl
+  trigger_threshold: 50          # min examples before auto-training
+  batch_size: 4
+  gradient_accumulation: 4
+  learning_rate: 2.0e-4
+  warmup_steps: 10
+  max_steps: 200
+  checkpoint_dir: ./checkpoints
+  keep_last_n: 3

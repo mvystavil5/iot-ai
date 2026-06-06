@@ -1,0 +1,52 @@
+# Sensor registry — every sensor the system knows about.
+# Add new sensors here before they start posting data.
+#
+# interface: serial — readings arrive via the STM32 co-processor (src/ingestion/serial_bridge.py)
+# interface: http   — readings arrive via POST /telemetry
+
+interfaces:
+  serial:
+    port: /dev/ttyACM0      # USB CDC from STM32U585; use /dev/ttyACM1 if 0 is taken
+    baud: 115200
+    source: stm32_mcu
+
+sensors:
+  - id: temp_01
+    name: "Living room temperature"
+    type: temperature
+    unit: C
+    location: "living_room"
+    expected_range: [-10, 50]
+    reporting_interval_s: 30
+    interface: serial
+    hardware: { model: DHT22, pin: D4 }
+
+  - id: humid_01
+    name: "Living room humidity"
+    type: humidity
+    unit: "%RH"
+    location: "living_room"
+    expected_range: [0, 100]
+    reporting_interval_s: 30
+    interface: serial
+    hardware: { model: DHT22, pin: D4 }   # same chip as temp_01
+
+  - id: co2_01
+    name: "Living room CO2 (air quality proxy)"
+    type: co2
+    unit: ppm
+    location: "living_room"
+    expected_range: [300, 5000]
+    reporting_interval_s: 30
+    interface: serial
+    hardware: { model: MQ-135, pin: A0, note: "uncalibrated proxy — replace with MH-Z19B for accurate PPM" }
+
+  - id: motion_01
+    name: "Living room motion"
+    type: motion
+    unit: bool
+    location: "living_room"
+    expected_range: [0, 1]
+    reporting_interval_s: 30             # periodic; also fires immediately on state change
+    interface: serial
+    hardware: { model: HC-SR501, pin: D7 }
