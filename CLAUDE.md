@@ -95,6 +95,37 @@ python -m src.ingestion.simulator --sensor temp_01 --value 22.4
 python -m src.model.cli "What is the current temperature trend?"
 ```
 
+## Reference hardware — Arduino UNO Q
+
+The primary sensor node for this project. Key specs that affect firmware and bridge code:
+
+| Property | Value |
+|---|---|
+| MCU | STM32U585, ARM Cortex-M33, 160 MHz, 2 MB Flash, 786 kB SRAM |
+| MPU | Qualcomm Dragonwing QRB2210, quad-core Cortex-A53 @ 2.0 GHz, Adreno GPU |
+| MPU RAM | 2 GB or 4 GB LPDDR4x |
+| MPU Storage | 16 GB or 32 GB eMMC |
+| Wi-Fi | Wi-Fi 5 (802.11ac) dual-band 2.4 / 5 GHz — WCBN3536A module, onboard antenna |
+| Bluetooth | Bluetooth 5.1, onboard antenna |
+| USB | USB-C |
+| MCU OS | Zephyr RTOS via Arduino Core |
+| MPU OS | Debian Linux (upstream support) |
+| MCU ↔ MPU | Arduino Bridge RPC over internal USB CDC |
+| Expansion | Qwiic / Modulino, MIPI-CSI (2× camera up to 25 MP), MIPI-DSI (display) |
+| Form factor | Standard UNO shield-compatible |
+
+**Transport: WiFi only — no Ethernet.** All telemetry leaves the board as HTTP POST over Wi-Fi 5 from `wifi_bridge.py` running on the MPU (Debian side). The MCU (STM32U585) reads GPIO sensors and hands data to the MPU via `Bridge.put()` / `Bridge.get()` RPC; the MPU timestamps and posts to `POST /telemetry`.
+
+Sensor wiring (reference build):
+
+| Sensor | Model | Measures | MCU pin | Vcc |
+|---|---|---|---|---|
+| Temperature + humidity | DHT22 | °C, %RH | D4 | 3.3 V |
+| Air quality (CO₂ proxy) | MQ-135 | ppm (rel.) | A0 | 5 V |
+| Motion | HC-SR501 PIR | bool | D7 | 5 V |
+
+Firmware lives in `firmware/arduino_uno_q/`; bridge lives in `src/ingestion/wifi_bridge.py`.
+
 ## Conventions
 
 - Python 3.11+, type hints everywhere, no `Any` unless truly unavoidable.

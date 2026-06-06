@@ -10,22 +10,24 @@
             │ GPIO — analog / digital
             ▼
 ┌─────────────────────────────────────────────────────┐
-│         STM32U585 co-processor  (Cortex-M33)         │
-│  • firmware/sensors/sensors.ino (Arduino sketch)    │
+│   STM32U585 MCU  (Cortex-M33, 160 MHz)  on UNO Q   │
+│  • firmware/arduino_uno_q/sensor_node.ino           │
 │  • Reads all sensors every 30 s                     │
 │  • Immediate send on PIR state change               │
-│  • Sends newline-delimited JSON over USB CDC serial  │
+│  • Sends newline-delimited SenML JSON via RPC       │
+│    (Arduino Bridge library → internal USB CDC)      │
 └───────────┬─────────────────────────────────────────┘
-            │ USB CDC serial  /dev/ttyACM0  @ 115200 baud
+            │ Arduino Bridge RPC (internal USB CDC, on-board)
             ▼
 ┌─────────────────────────────────────────────────────┐
-│      Serial Bridge  (src/ingestion/serial_bridge.py) │
+│  QRB2210 MPU  (quad Cortex-A53, 2 GHz)  on UNO Q   │
+│  Running: Debian Linux + src/ingestion/wifi_bridge.py│
+│  • Receives frames from MCU via Bridge library      │
 │  • Adds UTC timestamps (MCU has no RTC)             │
 │  • Validates sensor IDs against config/sensors.yaml  │
-│  • Reconnects automatically on USB unplug           │
-│  • POST /telemetry for each reading                 │
+│  • POST /telemetry over Wi-Fi 5 (WCBN3536A module)  │
 └───────────┬─────────────────────────────────────────┘
-            │ HTTP POST / MQTT (SenML JSON)
+            │ HTTP POST (SenML JSON) over Wi-Fi 5 2.4/5 GHz
             ▼
 ┌─────────────────────────────────────────────────────┐
 │              Ingestion Agent                         │
@@ -104,17 +106,37 @@ checkpoints/
 
 ## Hardware (Arduino UNO Q reference build)
 
+### Board specs
+
+| Component | Detail |
+|---|---|
+| MCU | STM32U585, ARM Cortex-M33, 160 MHz, 2 MB Flash, 786 kB SRAM |
+| MPU | Qualcomm Dragonwing QRB2210, quad-core Cortex-A53 @ 2.0 GHz, Adreno GPU |
+| RAM (MPU) | 2 GB or 4 GB LPDDR4x |
+| Storage (MPU) | 16 GB or 32 GB eMMC |
+| Wi-Fi | Wi-Fi 5 (802.11ac) dual-band 2.4/5 GHz, onboard antenna (WCBN3536A module) |
+| Bluetooth | Bluetooth 5.1, onboard antenna |
+| USB | USB-C (power + host/device) |
+| Form factor | Standard UNO shield-compatible footprint |
+| MCU OS | Zephyr RTOS (Arduino Core) |
+| MPU OS | Debian Linux (upstream support) |
+| MCU↔MPU link | Arduino Bridge RPC over internal USB CDC |
+| Expansion | Qwiic / Modulino connector, MIPI-CSI (2× camera), MIPI-DSI (display) |
+
+> **WiFi transport only.** No Ethernet shield. All telemetry leaves the board over Wi-Fi from the MPU side.
+
 ```
 Arduino UNO Q
-├── STM32U585  (Cortex-M33, 160 MHz)  ← runs sensors.ino
+├── STM32U585 MCU  (Cortex-M33, 160 MHz)  ← runs sensor_node.ino
 │   ├── D4  ── DHT22 data pin  (10 kΩ pull-up to 3.3 V)
 │   ├── A0  ── MQ-135 AOUT
 │   └── D7  ── HC-SR501 OUT
-└── QRB2210   (quad Cortex-A53, 2 GHz, 4 GB RAM)  ← runs Debian + Python stack
-    └── /dev/ttyACM0  ← USB CDC from STM32
+└── QRB2210 MPU   (quad Cortex-A53, 2 GHz, 2–4 GB RAM)  ← Debian + wifi_bridge.py
+    ├── Arduino Bridge RPC  ← frames from MCU
+    └── WCBN3536A Wi-Fi 5   ← HTTP POST to ingestion server
 ```
 
-| Sensor | Model | Measures | Pin | Power |
+| Sensor | Model | Measures | MCU Pin | Power |
 |---|---|---|---|---|
 | Temperature + humidity | DHT22 | °C, %RH | D4 | 3.3 V |
 | Air quality (CO₂ proxy) | MQ-135 | ppm (uncalibrated) | A0 | 5 V |

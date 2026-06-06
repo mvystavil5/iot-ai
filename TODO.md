@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-06-05
+Last updated: 2026-06-06
 
 ## Phase 1 — Local MVP (single machine, ~10 sensors)
 
@@ -52,6 +52,31 @@ Last updated: 2026-06-05
 
 ### Internal event bus
 - [ ] `src/events.py` — simple in-process pub/sub (topics: knowledge_chunks, store_updated, low_confidence, belief_invalidated, labeled_examples, model_updated)
+
+### Hardware — Arduino UNO Q
+
+**Board:** Arduino UNO Q — STM32U585 MCU (Cortex-M33, 160 MHz, 2 MB Flash, 786 kB SRAM) +
+Qualcomm Dragonwing QRB2210 MPU (quad Cortex-A53, 2 GHz, 2–4 GB LPDDR4x, 16–32 GB eMMC).
+Wi-Fi 5 dual-band 2.4/5 GHz (WCBN3536A, onboard antenna). **No Ethernet — WiFi only.**
+MCU runs Arduino sketch (Zephyr/Arduino Core); MPU runs Debian Linux.
+MCU→MPU link: Arduino Bridge RPC over internal USB CDC.
+
+#### MCU firmware (`firmware/arduino_uno_q/`)
+- [ ] `sensor_node.ino` — read DHT22 (D4), MQ-135 (A0), HC-SR501 (D7) every 30 s + PIR interrupt; serialize to newline-delimited SenML JSON; send to MPU via `Bridge.put()` RPC call
+- [ ] `config.h` — pin map, sensor IDs, sample interval (default 30 s), Bridge key names
+- [ ] Library deps to document: `ArduinoJson`, `DHT sensor library`, `Arduino Bridge`
+
+#### MPU bridge (`src/ingestion/wifi_bridge.py`)
+- [ ] Read sensor frames from MCU via `Bridge.get()` (Arduino Bridge Python client on Debian)
+- [ ] Stamp UTC timestamps (MCU has no RTC)
+- [ ] Validate sensor IDs against `config/sensors.yaml`
+- [ ] HTTP POST SenML JSON to `POST /telemetry` over Wi-Fi 5
+- [ ] Auto-retry with exponential backoff on network failure
+- [ ] CLI: `python wifi_bridge.py --server http://<host>:8000 [--dry-run] [--verbose]`
+
+#### Config & tests
+- [ ] `config/sensors.yaml` — entries already updated to `interface: wifi`; verify `wifi_standard: 802.11ac` field is consumed by `src/config.py`
+- [ ] `tests/ingestion/test_wifi_bridge.py` — mock Bridge client + mock HTTP server; verify timestamp injection, retry logic, SenML schema
 
 ### Infra / DX
 - [ ] `src/ingestion/__init__.py`, `src/knowledge/__init__.py`, etc. — package init files

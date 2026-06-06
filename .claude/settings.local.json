@@ -3,7 +3,8 @@
     "allow": [
       "Bash(find \"D:\\\\ai-setup\" -not -path \"*/\\\\.*\")",
       "PowerShell(head *)",
-      "WebFetch(domain:docs.arduino.cc)"
+      "WebFetch(domain:docs.arduino.cc)",
+      "WebFetch(domain:store.arduino.cc)"
     ]
   }
 }

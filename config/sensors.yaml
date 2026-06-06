@@ -1,14 +1,18 @@
 # Sensor registry — every sensor the system knows about.
 # Add new sensors here before they start posting data.
 #
-# interface: serial — readings arrive via the STM32 co-processor (src/ingestion/serial_bridge.py)
-# interface: http   — readings arrive via POST /telemetry
+# interface: wifi — readings arrive via HTTP POST /telemetry sent by wifi_bridge.py
+#                   running on the QRB2210 MPU (Debian Linux side of the Arduino UNO Q).
+#                   The STM32U585 MCU reads GPIO and passes frames to the MPU via
+#                   Arduino Bridge RPC; the MPU posts over Wi-Fi 5 (WCBN3536A).
+# interface: http — readings arrive via POST /telemetry from any other HTTP client
 
 interfaces:
-  serial:
-    port: /dev/ttyACM0      # USB CDC from STM32U585; use /dev/ttyACM1 if 0 is taken
-    baud: 115200
-    source: stm32_mcu
+  wifi:
+    transport: http_post          # MPU posts SenML JSON to POST /telemetry
+    wifi_standard: "802.11ac"    # Wi-Fi 5, dual-band 2.4/5 GHz
+    source: qrb2210_mpu          # wifi_bridge.py running on-board
+    mcu_link: arduino_bridge_rpc # MCU→MPU internal channel
 
 sensors:
   - id: temp_01
@@ -18,8 +22,8 @@ sensors:
     location: "living_room"
     expected_range: [-10, 50]
     reporting_interval_s: 30
-    interface: serial
-    hardware: { model: DHT22, pin: D4 }
+    interface: wifi
+    hardware: { board: "Arduino UNO Q", model: DHT22, mcu_pin: D4 }
 
   - id: humid_01
     name: "Living room humidity"
@@ -28,8 +32,8 @@ sensors:
     location: "living_room"
     expected_range: [0, 100]
     reporting_interval_s: 30
-    interface: serial
-    hardware: { model: DHT22, pin: D4 }   # same chip as temp_01
+    interface: wifi
+    hardware: { board: "Arduino UNO Q", model: DHT22, mcu_pin: D4 }   # same chip as temp_01
 
   - id: co2_01
     name: "Living room CO2 (air quality proxy)"
@@ -38,8 +42,8 @@ sensors:
     location: "living_room"
     expected_range: [300, 5000]
     reporting_interval_s: 30
-    interface: serial
-    hardware: { model: MQ-135, pin: A0, note: "uncalibrated proxy — replace with MH-Z19B for accurate PPM" }
+    interface: wifi
+    hardware: { board: "Arduino UNO Q", model: MQ-135, mcu_pin: A0, note: "uncalibrated proxy — replace with MH-Z19B for accurate PPM" }
 
   - id: motion_01
     name: "Living room motion"
@@ -48,5 +52,5 @@ sensors:
     location: "living_room"
     expected_range: [0, 1]
     reporting_interval_s: 30             # periodic; also fires immediately on state change
-    interface: serial
-    hardware: { model: HC-SR501, pin: D7 }
+    interface: wifi
+    hardware: { board: "Arduino UNO Q", model: HC-SR501, mcu_pin: D7 }
