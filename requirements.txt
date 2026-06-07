@@ -28,6 +28,7 @@ torch>=2.3            # CPU-only by default; install torch+cu121 for GPU
 
 # Observability
 structlog>=24.2
+psutil>=6.0            # CPU/memory load sampling for led_matrix indicator
 
 # Dev
 pytest>=8.2

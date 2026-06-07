@@ -4,7 +4,8 @@
       "Bash(find \"D:\\\\ai-setup\" -not -path \"*/\\\\.*\")",
       "PowerShell(head *)",
       "WebFetch(domain:docs.arduino.cc)",
-      "WebFetch(domain:store.arduino.cc)"
+      "WebFetch(domain:store.arduino.cc)",
+      "Bash(mkdir -p tests/ingestion)"
     ]
   }
 }

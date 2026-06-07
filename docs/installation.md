@@ -12,7 +12,7 @@ develop against it, and how to deploy it.
 
 | # | Item | Spec | Qty | Notes |
 |---|---|---|---|---|
-| 1 | Arduino UNO Q | STM32U585 MCU + Qualcomm QRB2210 MPU, 2/4 GB LPDDR4x, 16/32 GB eMMC, Wi-Fi 5 (802.11ac), BT 5.1 | 1 | Primary sensor node — runs firmware (MCU) + `wifi_bridge.py` (MPU/Debian) |
+| 1 | Arduino UNO Q | STM32U585 MCU + Qualcomm QRB2210 MPU, 2/4 GB LPDDR4x, 16/32 GB eMMC, Wi-Fi 5 (802.11ac), BT 5.1, onboard 12×8 LED matrix | 1 | **Phase 1 runs the entire stack on this one board** — firmware (MCU) + `wifi_bridge.py`, `led_matrix.py`, ingestion API, ChromaDB, and the LLM (MPU/Debian). No separate server needed. |
 | 2 | DHT22 temperature/humidity sensor | °C, %RH | 1 | Wired to MCU pin **D4**, needs 10 kΩ pull-up DATA→VCC |
 | 3 | MQ-135 air-quality sensor | analog, ppm proxy (CO₂) | 1 | Wired to MCU pin **A0**; uncalibrated — see note below |
 | 4 | HC-SR501 PIR motion sensor | digital bool | 1 | Wired to MCU pin **D7** |
@@ -33,7 +33,11 @@ HC-SR501 VCC → 5 V     GND → GND   OUT  → D7
 > PPM readings, replace it with an **MH-Z19B** NDIR CO₂ sensor (see
 > `config/sensors.yaml` → `co2_01.hardware.note`).
 
-### 1.2 Host / server machine
+### 1.2 Host / server machine — **Phase 2 only**
+
+Phase 1 needs **no separate machine**: the UNO Q's QRB2210 MPU hosts the
+entire stack itself (see §4.1). Provision the machine below only when you
+outgrow Phase 1 and migrate to the Phase 2 multi-room/server topology (§4.2).
 
 | Item | Minimum | Recommended | Notes |
 |---|---|---|---|
@@ -109,25 +113,42 @@ firmware sends (`temp_01`, `humid_01`, `co2_01`, `motion_01` by default).
 
 ### 2.4 Connect the sensor node
 
-The Arduino UNO Q ships data over **Wi-Fi only** (no Ethernet):
+The Arduino UNO Q ships data over **Wi-Fi only** (no Ethernet). In the
+**Phase 1 on-device topology** (§4.1, the default), `wifi_bridge.py` simply
+points back at the API running on the same board:
 
 1. Power the UNO Q and confirm `wifi_bridge.py` is running on its Debian (MPU)
    side — it reads frames from the MCU over Arduino Bridge RPC, timestamps
    them (the MCU has no RTC), validates sensor IDs against
    `config/sensors.yaml`, and POSTs SenML JSON to `POST /telemetry`.
-2. Point it at your host's ingestion API:
+2. Point it at the local ingestion API (same board, Phase 1):
    ```bash
-   python wifi_bridge.py --server http://<host>:8000
+   python wifi_bridge.py --server http://127.0.0.1:8000
    ```
+   For the Phase 2 separate-server topology (§4.2), point `--server` at that
+   host's address instead.
 
 For bench testing without the full wireless path, you can instead tether the
-UNO Q over USB-C and run the serial bridge directly on the host:
+UNO Q over USB-C and run the serial bridge directly:
 
 ```bash
 python -m src.ingestion.serial_bridge --port /dev/ttyACM0 --api http://127.0.0.1:8000
 ```
 
-### 2.5 Start the stack
+### 2.5 Start the load indicator
+
+`led_matrix.py` drives the UNO Q's onboard 12×8 LED matrix as a live system
+gauge — left bar = CPU %, right bar = memory %, both filling bottom-up —
+sampled via `psutil`. Run it on the MPU alongside the bridge and API:
+
+```bash
+python -m src.ingestion.led_matrix --interval 2.0
+```
+
+If the vendor LED matrix binding isn't installed (e.g. on a dev machine), it
+falls back to logging an ASCII rendering instead of failing.
+
+### 2.6 Start the stack
 
 ```bash
 # Ingestion + query API
@@ -190,6 +211,10 @@ uv run pytest tests/ingestion/      # mirror src/ layout per area
 4. Use `python -m src.exploration.scheduler --list` / `--run-next --verbose`
    to drive an active-exploration cycle manually (mirrors the
    `run-experiment` skill).
+5. Run `python -m src.ingestion.led_matrix --debug` to watch CPU/memory load
+   sampling in real time (logs an ASCII rendering on dev machines without the
+   physical matrix) — useful for confirming the indicator reflects load while
+   you exercise the pipeline above.
 
 ### 3.5 Agents and skills
 
@@ -201,15 +226,20 @@ for the full mapping of agent → file → role.
 
 ## 4. Deployment
 
-### 4.1 Single-machine deployment (Phase 1 target: ~10 sensors)
+### 4.1 On-device deployment — Phase 1 target (~10 sensors, default)
 
-This is the default mode described above: SQLite for time-series storage,
-ChromaDB (file-backed at `./data/chroma`) for the vector store, and
-`smollm2:135m` served locally via Ollama. Run the API under a process
-supervisor for resilience:
+**The entire stack runs on the UNO Q's QRB2210 MPU — no separate server.**
+The board's Debian Linux side hosts the FastAPI ingestion/query API, SQLite,
+file-backed ChromaDB (`./data/chroma`), and `smollm2:135m` via Ollama, all
+within its 2–4 GB RAM / 16–32 GB eMMC envelope (sized for exactly this in
+`config/model.yaml`). Run everything as supervised long-lived processes on
+the board itself:
 
 ```bash
+# On the UNO Q (Debian/MPU side)
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1
+python wifi_bridge.py --server http://127.0.0.1:8000
+python -m src.ingestion.led_matrix --interval 2.0
 ```
 
 > Use a single worker — the in-process event bus
@@ -217,13 +247,35 @@ uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1
 > `config/agents.yaml`) and the file-backed ChromaDB store are not safe to
 > share across multiple processes.
 
-Run `wifi_bridge.py` (or `serial_bridge.py` for tethered setups) as a
-long-lived service alongside the API — both auto-reconnect on transport
-failure (Wi-Fi drop / USB unplug).
+`wifi_bridge.py` (or `serial_bridge.py` for tethered bench setups) and
+`led_matrix.py` auto-reconnect / degrade gracefully on transport or hardware
+issues (Wi-Fi drop, USB unplug, missing matrix binding) — supervise all three
+alongside `uvicorn` (e.g. via `systemd` units or a process manager).
 
-### 4.2 Scaling out (Phase 2+)
+The 12×8 LED matrix doubles as your headroom gauge: watch it (left = CPU %,
+right = memory %) to judge when the board is approaching the limits that
+warrant moving to §4.2.
 
-The config layer is designed so backend swaps require no code changes:
+### 4.2 Migrating to a separate server — Phase 2+ (multi-room/building)
+
+When sensor count, query load, or LLM quality needs outgrow the UNO Q's
+on-device headroom (the LED matrix gauge running consistently near full is
+your signal), migrate the knowledge/reasoning stack to a separate server —
+**no application code changes required**, only config and a data copy:
+
+1. Provision the host described in §1.2.
+2. Copy `data/` (SQLite DB, `data/chroma/`, `beliefs.jsonl`,
+   `labeled_examples.jsonl`) to the new host.
+3. Start the API stack there (`uvicorn src.api.main:app ...`).
+4. On the UNO Q, repoint the bridge at the new host and keep the LED matrix
+   running locally as a board-health gauge:
+   ```bash
+   python wifi_bridge.py --server http://<server-host>:8000
+   python -m src.ingestion.led_matrix --interval 2.0
+   ```
+
+The config layer is designed so backend swaps within that migration require
+no code changes:
 
 | Swap | From → To | Where |
 |---|---|---|
@@ -250,6 +302,7 @@ keeping the last `keep_last_n` versions). For CPU-only hosts, leave
 - [ ] `data/chroma/`, `data/*.db`, `checkpoints/` excluded from git (`.gitignore`)
 - [ ] Ollama service running and models pulled (`smollm2:135m`, `nomic-embed-text`)
 - [ ] `wifi_bridge.py` (or `serial_bridge.py`) running as a supervised long-lived process
+- [ ] `led_matrix.py` running and showing live CPU/memory bars (or logging ASCII frames if no physical matrix binding)
 - [ ] `GET /health` returns OK and `GET /beliefs` shows recent entries
 - [ ] Backups of `data/beliefs.jsonl`, `data/labeled_examples.jsonl`, and `checkpoints/`
 - [ ] `config/agents.yaml: explorer.schedule_cron` matches your desired hypothesis-generation cadence

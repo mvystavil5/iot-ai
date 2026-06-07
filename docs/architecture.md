@@ -1,5 +1,24 @@
 # System Architecture
 
+## Deployment topology
+
+**Phase 1 (current target, ~10 sensors) runs the entire stack on the UNO Q
+itself** — no separate server. The QRB2210 MPU's Debian Linux side hosts
+`wifi_bridge.py`, `led_matrix.py`, the FastAPI ingestion/query API, SQLite,
+file-backed ChromaDB, and `smollm2:135m` served by Ollama, all within its
+2–4 GB RAM / 16–32 GB eMMC envelope. This collapses the "Sensors → MCU → MPU
+→ [HTTP over Wi-Fi] → server" hop in the diagram below into a single board:
+the MPU *is* the ingestion/knowledge/reasoning host, reachable at
+`http://<uno-q-host>:8000`.
+
+**Phase 2 (multi-room/multi-building, see `TODO.md`)** migrates the
+Knowledge Builder, Reasoner, Explorer, and Trainer agents to a separate
+server — `wifi_bridge.py` then simply points `--server` at that host instead
+of `127.0.0.1`. Because every backend in `config/model.yaml` is swappable
+without code changes (SQLite→TimescaleDB, ChromaDB→Qdrant), migrating means
+copying `data/` to the new host and repointing the bridge — see
+`docs/installation.md` § Deployment for the full migration checklist.
+
 ## Data flow
 
 ```
@@ -26,8 +45,13 @@
 │  • Adds UTC timestamps (MCU has no RTC)             │
 │  • Validates sensor IDs against config/sensors.yaml  │
 │  • POST /telemetry over Wi-Fi 5 (WCBN3536A module)  │
+│  • src/ingestion/led_matrix.py: 12×8 LED matrix     │
+│    shows live CPU % (left bar) / memory % (right    │
+│    bar) — bottom-up fill, sampled via psutil        │
+│                                                       │
+│  ── Phase 1: everything below also runs HERE ──────  │
 └───────────┬─────────────────────────────────────────┘
-            │ HTTP POST (SenML JSON) over Wi-Fi 5 2.4/5 GHz
+            │ Phase 1: in-process · Phase 2: HTTP POST (SenML JSON) over Wi-Fi 5
             ▼
 ┌─────────────────────────────────────────────────────┐
 │              Ingestion Agent                         │
@@ -121,6 +145,7 @@ checkpoints/
 | MCU OS | Zephyr RTOS (Arduino Core) |
 | MPU OS | Debian Linux (upstream support) |
 | MCU↔MPU link | Arduino Bridge RPC over internal USB CDC |
+| Onboard display | 12×8 monochrome LED matrix — driven from the MPU side by `src/ingestion/led_matrix.py` as a CPU/memory load gauge (assumed parity with UNO R4 WiFi's matrix; confirm against your unit) |
 | Expansion | Qwiic / Modulino connector, MIPI-CSI (2× camera), MIPI-DSI (display) |
 
 > **WiFi transport only.** No Ethernet shield. All telemetry leaves the board over Wi-Fi from the MPU side.
@@ -132,8 +157,11 @@ Arduino UNO Q
 │   ├── A0  ── MQ-135 AOUT
 │   └── D7  ── HC-SR501 OUT
 └── QRB2210 MPU   (quad Cortex-A53, 2 GHz, 2–4 GB RAM)  ← Debian + wifi_bridge.py
-    ├── Arduino Bridge RPC  ← frames from MCU
-    └── WCBN3536A Wi-Fi 5   ← HTTP POST to ingestion server
+    ├── Arduino Bridge RPC      ← frames from MCU
+    ├── 12×8 LED matrix         ← led_matrix.py: live CPU %/mem % gauge
+    ├── WCBN3536A Wi-Fi 5       ← HTTP POST /telemetry
+    └── Phase 1: also hosts the ingestion API, SQLite, ChromaDB,
+        and smollm2:135m (Ollama) — the whole stack, on one board
 ```
 
 | Sensor | Model | Measures | MCU Pin | Power |

@@ -111,10 +111,13 @@ The primary sensor node for this project. Key specs that affect firmware and bri
 | MCU OS | Zephyr RTOS via Arduino Core |
 | MPU OS | Debian Linux (upstream support) |
 | MCU ↔ MPU | Arduino Bridge RPC over internal USB CDC |
+| Onboard display | 12×8 monochrome LED matrix (assumed parity with UNO R4 WiFi's matrix — confirm against your unit) |
 | Expansion | Qwiic / Modulino, MIPI-CSI (2× camera up to 25 MP), MIPI-DSI (display) |
 | Form factor | Standard UNO shield-compatible |
 
 **Transport: WiFi only — no Ethernet.** All telemetry leaves the board as HTTP POST over Wi-Fi 5 from `wifi_bridge.py` running on the MPU (Debian side). The MCU (STM32U585) reads GPIO sensors and hands data to the MPU via `Bridge.put()` / `Bridge.get()` RPC; the MPU timestamps and posts to `POST /telemetry`.
+
+**Phase 1 runs entirely on the UNO Q.** The QRB2210 MPU (Debian Linux) is sized to host the whole Phase-1 stack — ingestion API, SQLite, file-backed ChromaDB, and `smollm2:135m` via Ollama — alongside `wifi_bridge.py`, with no separate server. `src/ingestion/led_matrix.py` drives the onboard 12×8 LED matrix as a live CPU/memory load gauge (left bar = CPU %, right bar = memory %, bottom-up fill) so the board's own headroom is visible at a glance. Phase 2 (multi-room/multi-building, see `TODO.md`) migrates the knowledge/reasoning stack to a separate server — see `docs/installation.md` § Deployment for the migration path.
 
 Sensor wiring (reference build):
 
