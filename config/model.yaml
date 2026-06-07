@@ -55,3 +55,8 @@ training:
   max_steps: 200
   checkpoint_dir: ./checkpoints
   keep_last_n: 3
+  sync:
+    enabled: false                       # Phase 1 default: off until a training host is provisioned
+    host: "http://training-host:8100"   # base URL of the offline/cloud training service
+    push_batch_size: 50                  # new labeled examples per export batch
+    poll_interval_s: 1800                # how often the board checks for a newer adapter

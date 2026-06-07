@@ -290,12 +290,77 @@ Explorer, and stand up a dashboard polling `/health` and `/beliefs`.
 
 ### 4.3 Fine-tuning / training deployment
 
-The Trainer agent is **disabled by default** (`config/agents.yaml: trainer.enabled: false`)
-— enable it once you have a GPU and `training.trigger_threshold` (default 50)
-labeled examples have accumulated in `data/labeled_examples.jsonl`. LoRA
-checkpoints are written to `training.checkpoint_dir` (`./checkpoints`,
-keeping the last `keep_last_n` versions). For CPU-only hosts, leave
-`torch` at its default CPU build; for GPU hosts install `torch+cu121`.
+**LoRA fine-tuning never runs on the UNO Q** — its QRB2210 MPU has no
+CUDA-class GPU and its 2–4 GB RAM is already committed to inference
+(§4.1). Instead, the board only accumulates labeled examples and pulls back
+whatever adapter a separate **training host** produces — see
+`docs/architecture.md` § Training & adapter sync for the full data-flow
+diagram and design rationale. The Trainer agent stays **disabled in
+`config/agents.yaml`** (`trainer.enabled: false`); training is triggered
+manually on the host via `src/model/trainer.py`, not by an on-board agent.
+
+**1. Provision and run the training host** (the machine from §1.2 — GPU
+recommended; CPU-only works but is slow):
+
+```bash
+# On the training host
+uv pip install -r requirements.txt    # includes peft, transformers, datasets, torch
+uvicorn src.model.training_service:app --host 0.0.0.0 --port 8100
+```
+
+This serves `POST /training/examples` (receives batches pushed from the
+board), `GET /training/registry` (serves `data/model_registry.json`), and
+`GET /training/adapter/{version}` (streams a checkpoint as a tarball) — the
+three endpoints `adapter_sync.py` talks to.
+
+**2. Enable the sync** in `config/model.yaml: training.sync` (off by default
+in Phase 1):
+
+```yaml
+training:
+  sync:
+    enabled: true
+    host: "http://<training-host>:8100"
+    push_batch_size: 50      # examples per export batch
+    poll_interval_s: 1800    # adapter-registry poll cadence
+```
+
+**3. Run the sync loop on the board**, alongside `wifi_bridge.py` and
+`led_matrix.py`:
+
+```bash
+python -m src.model.adapter_sync              # continuous push+pull loop
+python -m src.model.adapter_sync --once       # single cycle, e.g. for cron
+```
+
+It pushes a batch to `{host}/training/examples` whenever
+`data/labeled_examples.jsonl` has accumulated `push_batch_size` new lines
+(tracked via a high-water mark in `data/sync_state.json`), and polls
+`{host}/training/registry` every `poll_interval_s` — when a newer
+`current_version` appears, it downloads the adapter tarball, atomically
+swaps it into `checkpoints/current/` (old version archived to
+`checkpoints/.previous/`), and rewrites the local `data/model_registry.json`.
+
+**4. Run training on the host** once enough examples have accumulated:
+
+```bash
+python -m src.model.trainer --check-readiness   # N examples vs. trigger_threshold (default 50)
+python -m src.model.trainer --run --verbose      # full LoRA fine-tune → eval → promote
+```
+
+`--run` loads `data/labeled_examples.jsonl`, formats instruction-tuning
+pairs, splits 80/10/10 (stratified by sensor type), fine-tunes via PEFT
+(`config/model.yaml: lora`/`training`), evaluates on the held-out test set,
+and promotes to `checkpoints/current/` only if it beats the best
+`eval_score` on record — recording the run in `data/training_runs.jsonl`
+and `data/model_registry.json` (keeping the last `keep_last_n` checkpoints).
+For CPU-only hosts, leave `torch` at its default CPU build; for GPU hosts
+install `torch+cu121`.
+
+> `_evaluate` is the one piece of `trainer.py` that's still a stub — it
+> needs `src/model/reasoner.py` (not yet implemented per `TODO.md`) to score
+> a fine-tuned adapter against held-out test pairs. Wire it up once that
+> module exists.
 
 ### 4.4 Operational checklist
 

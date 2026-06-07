@@ -19,6 +19,54 @@ without code changes (SQLite→TimescaleDB, ChromaDB→Qdrant), migrating means
 copying `data/` to the new host and repointing the bridge — see
 `docs/installation.md` § Deployment for the full migration checklist.
 
+## Training & adapter sync
+
+The QRB2210 MPU has no CUDA-class GPU and a 2–4 GB RAM budget already spent
+on inference, so **LoRA fine-tuning never runs on the board** — it runs on a
+separate offline/cloud **training host** (a GPU box, or Modal/RunPod per the
+Phase 4 notes in `TODO.md`). The board's job in Phase 1 is just to
+*accumulate* labeled examples and *pull back* whatever adapter the host
+produces. Both legs of that exchange are **outbound-only HTTP from the
+board** — the same "may sit behind NAT" assumption that shapes
+`wifi_bridge.py` — so the board never needs to be reachable:
+
+```
+UNO Q (board)                                   Training host (GPU/cloud)
+─────────────                                   ─────────────────────────
+data/labeled_examples.jsonl                     data/labeled_examples.jsonl
+        │ src/model/adapter_sync.py                     ▲
+        │ batch POST once                               │ src/model/training_service.py
+        │ training.sync.push_batch_size                 │ POST /training/examples
+        │ new lines accumulate                          │ appends batch
+        └──────── POST /training/examples ──────────────┘
+
+        ┌──────── GET  /training/registry ───────────────┐
+        │ poll every                                     │ GET /training/registry
+        │ training.sync.poll_interval_s,                 │ serves data/model_registry.json
+        │ compare current_version                        ▼
+        │                                       src/model/trainer.py
+        │  if newer:                              --check-readiness
+        │  GET /training/adapter/{version} ◄──────  --run → PEFT LoRA fine-tune
+        ▼  (tarball, streamed by training_service)       → _evaluate → _promote
+checkpoints/{version}/ → atomic swap → checkpoints/current/
+data/model_registry.json rewritten locally
+(Reasoner compares its loaded version to the registry's
+current_version on each query and hot-reloads — no event bus needed)
+```
+
+Why pull-based for the adapter and push-based for examples: the board
+initiates both, but a *poll* lets it discover a new adapter whenever the
+host finishes a run (the host has no way to reach the board to announce
+one), while a *push*, gated on `training.sync.push_batch_size`, keeps
+example-export decoupled from the host's own `trigger_threshold` — the host
+accumulates across many small pushes and `trainer.py --check-readiness`
+decides when a run is warranted. `_swap_current` in `adapter_sync.py` stages
+the extracted adapter and renames it into place atomically (old version
+archived to `checkpoints/.previous/`) so a crash mid-pull can never leave
+`checkpoints/current/` partially written. See
+`docs/installation.md` § 4.3 for running the training service and enabling
+the sync.
+
 ## Data flow
 
 ```

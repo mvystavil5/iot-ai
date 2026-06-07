@@ -36,10 +36,46 @@ Last updated: 2026-06-06
 - [ ] `src/exploration/outcomes.py` — log results to `data/labeled_examples.jsonl`
 - [ ] `tests/exploration/`
 
-### Training
-- [ ] `src/model/trainer.py` — LoRA fine-tune via PEFT: `--check-readiness`, `--run`, replay buffer, checkpoint promotion
-- [ ] `data/model_registry.json` — initial empty registry
-- [ ] `tests/model/test_trainer.py`
+### Training & adapter sync
+
+LoRA fine-tuning runs off-board on a separate training host (the QRB2210 MPU
+has no CUDA-class GPU and its RAM is committed to inference) — see
+`docs/architecture.md` § Training & adapter sync for the push/pull data-flow
+diagram and `docs/installation.md` § 4.3 for deployment instructions.
+
+#### Adapter sync (`src/model/adapter_sync.py`) — **done** (runs on the board)
+- [x] Push: batch labeled examples to `{host}/training/examples`, gated by
+      `training.sync.push_batch_size`, tracked via high-water mark in `data/sync_state.json`
+- [x] Pull: poll `{host}/training/registry` every `training.sync.poll_interval_s`;
+      download and atomically swap a newer adapter into `checkpoints/current/`
+      (old version archived to `checkpoints/.previous/`)
+- [x] CLI: `python -m src.model.adapter_sync [--once] [--debug]`
+- [x] `tests/model/test_adapter_sync.py` — push batching/high-water-mark, version
+      comparison, atomic swap, full pull flow against a mocked training host (`httpx.MockTransport`)
+
+#### Training service (`src/model/training_service.py`) — **done** (runs on the training host)
+- [x] `POST /training/examples` — append a pushed batch to `data/labeled_examples.jsonl`
+- [x] `GET /training/registry` — serve `data/model_registry.json`
+- [x] `GET /training/adapter/{version}` — stream a checkpoint directory as a tarball
+- [x] Run via `uvicorn src.model.training_service:app --host 0.0.0.0 --port 8100`
+
+#### Trainer orchestration (`src/model/trainer.py`) — **partially done** (runs on the training host)
+- [x] `--check-readiness` — example count vs. `trigger_threshold`, current registry
+      version/score, last run timestamp
+- [x] `_format_pairs` / `_split` — instruction-tuning pair formatting, 80/10/10
+      split stratified by sensor type
+- [x] `_promote` / registry bookkeeping — promote only if `eval_score` beats the
+      best on record, prune to `keep_last_n`, append `data/training_runs.jsonl`
+- [x] `_fine_tune` — PEFT `LoraConfig`/`get_peft_model` + HF `Trainer`, wired to
+      `config/model.yaml: lora`/`training` (lazy-imported; needs a real base
+      model + GPU to exercise)
+- [ ] `_evaluate` — currently `NotImplementedError`; needs `src/model/reasoner.py`
+      (not yet implemented) to score a fine-tuned adapter against held-out test pairs
+- [x] CLI: `python -m src.model.trainer --check-readiness` / `--run --verbose`
+- [x] `tests/model/test_trainer.py` — readiness, formatting/splitting, promotion/pruning, run-guard
+
+#### Registry seed
+- [x] `data/model_registry.json` — initial `{"current_version": null, "checkpoints": []}`
 
 ### API
 - [ ] Wire `POST /telemetry` → ingestion pipeline
