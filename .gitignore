@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# IoT World-Model runtime data — generated at runtime by the agents
+# (data/model_registry.json is a tracked seed file, not ignored here)
+data/chroma/
+data/timeseries.db
+data/*.jsonl
+data/sync_state.json
+checkpoints/
+

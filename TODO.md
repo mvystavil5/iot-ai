@@ -1,41 +1,42 @@
 # TODO
 
-Last updated: 2026-06-07
+Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration stacks + API wiring implemented and tested (113 tests passing)
 
 ## Phase 1 — Local MVP (single machine, ~10 sensors)
 
 ### Ingestion
-- [ ] `src/ingestion/pipeline.py` — main ingestion entry point (validate → normalize → store → emit chunk)
-- [ ] `src/ingestion/normalizer.py` — unit conversion rules (°F→°C, psi→kPa, etc.)
-- [ ] `src/ingestion/storage.py` — SQLite time-series writer (schema: sensor_id, timestamp, value, unit, outlier, tags)
-- [ ] `src/ingestion/validator.py` — CLI wrapper: `python -m src.ingestion.validator --input <file>`
-- [ ] `src/ingestion/simulator.py` — generate fake sensor readings for local testing
-- [ ] `src/ingestion/mqtt_bridge.py` — subscribe to MQTT topic, forward to pipeline
-- [ ] `tests/ingestion/test_pipeline.py`
+- [x] `src/ingestion/pipeline.py` — main ingestion entry point (validate → normalize → store → emit chunk via event bus)
+- [x] `src/ingestion/normalizer.py` — unit conversion rules (canonical units + outlier flag against `expected_range`)
+- [x] `src/ingestion/storage.py` — SQLite time-series writer (schema: sensor_id, timestamp, value, unit, outlier, tags; composite PK dedupes silently)
+- [x] `src/ingestion/validator.py` — CLI wrapper: `python -m src.ingestion.validator --input <file> [--ingest]`
+- [x] `src/ingestion/simulator.py` — one-shot + continuous random-walk simulation, `--pipeline` bypass flag
+- [ ] `src/ingestion/mqtt_bridge.py` — subscribe to MQTT topic, forward to pipeline (Phase 1 uses HTTP POST only — see Hardware § wifi_bridge)
+- [x] `tests/ingestion/test_pipeline.py` — 13 tests covering validate/normalize/store/emit + outlier/dedup paths
 
 ### Knowledge
-- [ ] `src/knowledge/embedder.py` — call nomic-embed-text via Ollama, return 768d vector
-- [ ] `src/knowledge/store.py` — ChromaDB client wrapper (upsert, query, evict, stats)
-- [ ] `src/knowledge/chunker.py` — single-reading chunks + 60s aggregate chunks for high-freq sensors
-- [ ] `src/knowledge/event_chunk.py` — detect threshold crossings, create event chunks with higher weight
-- [ ] `python -m src.knowledge.cli stats` — inspect store health
-- [ ] `tests/knowledge/`
+- [x] `src/knowledge/embedder.py` — call nomic-embed-text via Ollama (lazy import), `embed`/`embed_one`
+- [x] `src/knowledge/store.py` — ChromaDB client wrapper (lazy import; upsert, query, evict_to_limit, stats; JSON-encodes `tags` for Chroma's scalar-only metadata)
+- [x] `src/knowledge/chunker.py` — single-reading chunks + 60s aggregate chunks (min/max/mean/stddev/trend) for high-freq sensors
+- [x] `src/knowledge/event_chunk.py` — detect `expected_range` threshold crossings, create event chunks tagged `weight=2.0`
+- [x] `src/knowledge/builder.py` — orchestrator wiring `knowledge_chunks` events → embedder → store → `store_updated` (new; not originally listed but the natural integration point)
+- [x] `python -m src.knowledge.cli stats` — inspect store health
+- [x] `tests/knowledge/` — 22 tests across chunker, event_chunk, embedder, store, builder
 
 ### Model / Reasoner
 - [x] `src/model/rag_confidence.py` — RAG-derived confidence scoring (coverage × similarity × recency × consistency, no LLM introspection); `tests/model/test_rag_confidence.py`
-- [ ] `src/model/retriever.py` — top-k retrieval with recency weighting (`score *= exp(-age_h / decay)`)
-- [ ] `src/model/llm.py` — thin wrapper: Ollama backend + Claude API fallback (reads `config/model.yaml`)
-- [ ] `src/model/reasoner.py` — full RAG chain: enrich query → retrieve → build prompt → call LLM → parse confidence; also the integration point `trainer._evaluate` needs (see Training below)
-- [ ] `src/model/beliefs.py` — read/write `data/beliefs.jsonl`, invalidation logic
-- [ ] `src/model/cli.py` — `python -m src.model.cli "<query>" [--show-context] [--show-beliefs]`
-- [ ] `tests/model/` — retriever, llm, reasoner, beliefs, cli (rag_confidence/adapter_sync/trainer already covered, see above/below)
+- [x] `src/model/retriever.py` — top-k retrieval with recency weighting (`score = similarity * exp(-age_h / decay_hours)`)
+- [x] `src/model/llm.py` — thin wrapper: Ollama backend + Claude API backend (lazy imports, reads `config/model.yaml: llm`)
+- [x] `src/model/reasoner.py` — full RAG chain: retrieve → `compute_rag_confidence` (canonical confidence source — smollm2:135m self-reports aren't trusted) → build prompt → call LLM (with context-summary fallback) → record belief → publish `low_confidence`
+- [x] `src/model/beliefs.py` — read/write `data/beliefs.jsonl`; invalidation when same `query_hash` + different answer + confidence > `invalidation_threshold` → `belief_invalidated` event
+- [x] `src/model/cli.py` — `python -m src.model.cli "<query>" [--show-context] [--show-beliefs]`
+- [x] `tests/model/test_retriever.py`, `test_llm.py`, `test_beliefs.py`, `test_reasoner.py` — 51 tests total for the model layer (rag_confidence/adapter_sync/trainer covered separately, see above/below)
 
 ### Exploration
-- [ ] `src/exploration/hypothesis_generator.py` — produce ranked hypotheses from low-confidence beliefs
-- [ ] `src/exploration/scheduler.py` — `--list`, `--run-next`, `--verbose` CLI
-- [ ] `src/exploration/experiments.py` — observation, alert, and simulation experiment runners
-- [ ] `src/exploration/outcomes.py` — log results to `data/labeled_examples.jsonl`
-- [ ] `tests/exploration/`
+- [x] `src/exploration/hypothesis_generator.py` — rank candidate sensor-relationship hypotheses from low-confidence/invalidated beliefs by `(information_gain × feasibility) / cost`; queues to `data/hypothesis_queue.jsonl`
+- [x] `src/exploration/scheduler.py` — `--list`, `--run-next [--verbose]` CLI; dispatches the top-ranked pending hypothesis to its experiment runner and marks it done
+- [x] `src/exploration/experiments.py` — observation (trend-correlation over recent history), alert (expected_range breach check), and simulation (synthetic random-walk trend check) experiment runners — Phase 1 has no actuation hardware, so "active query" has no runner yet
+- [x] `src/exploration/outcomes.py` — log results to `data/experiment_outcomes.jsonl`; forwards non-inconclusive outcomes as labeled examples to `training.labeled_examples_path` + `labeled_examples` event
+- [x] `tests/exploration/` — 22 tests across hypothesis_generator, experiments, outcomes, scheduler
 
 ### Training & adapter sync
 
@@ -79,16 +80,16 @@ diagram and `docs/installation.md` § 4.3 for deployment instructions.
 - [x] `data/model_registry.json` — initial `{"current_version": null, "checkpoints": []}`
 
 ### API
-- [ ] Wire `POST /telemetry` → ingestion pipeline
-- [ ] Wire `GET /query` → reasoner
-- [ ] Wire `GET /beliefs` → beliefs store
-- [ ] Wire `GET /hypotheses` → hypothesis queue
-- [ ] Wire `POST /experiment/run` → explorer scheduler
+- [x] Wire `POST /telemetry` → ingestion pipeline
+- [x] Wire `GET /query` → reasoner
+- [x] Wire `GET /beliefs` → beliefs store
+- [x] Wire `GET /hypotheses` → hypothesis queue (`scheduler.list_queue`)
+- [x] Wire `POST /experiment/run` → explorer scheduler (`scheduler.run_next`)
 - [ ] Wire `POST /train` → trainer
-- [ ] `tests/api/`
+- [ ] `tests/api/` — FastAPI `TestClient` coverage for the wired routes (none yet — routes verified only via direct unit tests of the agents/services they delegate to + an import-time route-listing smoke check)
 
 ### Internal event bus
-- [ ] `src/events.py` — simple in-process pub/sub (topics: knowledge_chunks, store_updated, low_confidence, belief_invalidated, labeled_examples, model_updated)
+- [x] `src/events.py` — `EventBus` in-process pub/sub singleton (`bus`); `subscribe`/`unsubscribe`/`publish`/`clear`, handlers run inline with exceptions logged not raised (topics in use: knowledge_chunks, store_updated, low_confidence, belief_invalidated, labeled_examples; model_updated reserved for Trainer)
 
 ### Hardware — Arduino UNO Q
 
@@ -137,14 +138,13 @@ points `wifi_bridge.py --server` at the new host.
 - [ ] `tests/ingestion/test_wifi_bridge.py` — mock Bridge client + mock HTTP server; verify timestamp injection, retry logic, SenML schema (once `wifi_bridge.py` exists — see above)
 
 ### Infra / DX
-- [x] `src/ingestion/__init__.py`, `src/model/__init__.py` — present
-- [ ] `src/api/__init__.py`, `src/knowledge/__init__.py`, `src/exploration/__init__.py` — still missing (those packages have no modules yet either)
+- [x] `src/ingestion/__init__.py`, `src/model/__init__.py`, `src/api/__init__.py`, `src/knowledge/__init__.py`, `src/exploration/__init__.py` — present
 - [ ] `Makefile` — `make dev`, `make test`, `make simulate`, `make query Q="..."`
 - [ ] `.env.example` — document all env vars (OLLAMA_HOST, LOG_LEVEL, etc.)
 - [ ] `pyproject.toml` — replace `requirements.txt` with `uv`-compatible pyproject
 - [ ] Set up `ollama pull nomic-embed-text && ollama pull phi3:mini` in quickstart docs
-- [ ] `data/` directory — `model_registry.json` is seeded; still need `.gitkeep` (or real files) for `beliefs.jsonl`, `hypothesis_queue.jsonl`, `labeled_examples.jsonl`, `training_runs.jsonl`, `chroma/`, `timeseries.db` (excluded via `.gitignore`)
-- [x] `.gitignore` — present
+- [ ] `data/` directory — `model_registry.json` is seeded; `beliefs.jsonl`, `hypothesis_queue.jsonl`, `labeled_examples.jsonl`, `experiment_outcomes.jsonl`, `timeseries.db`, `chroma/` are all created on first write by their owning modules and excluded via `.gitignore` — still no `training_runs.jsonl` seed/`.gitkeep`
+- [x] `.gitignore` — present, covers `data/chroma/`, `data/timeseries.db`, `data/*.jsonl`, `data/sync_state.json`, `checkpoints/`
 
 ---
 
