@@ -38,16 +38,32 @@ beliefs:
   path: ./data/beliefs.jsonl
   invalidation_threshold: 0.7   # new belief must have confidence > this to invalidate old
 
-identity:
-  # Opt-in routine-attribution — see src/identity/. Matches "whose routine
-  # does this look like" against consciously-registered behavioral
-  # signatures; never raw biometrics, never presented as fact below threshold.
-  match_confidence_threshold: 0.6   # below this, report "unknown" rather than force a guess
-  live_window_minutes: 30           # recent-history window used to build the live signature
+security:
+  # Occupancy-anomaly detection — see src/security/. Learns one aggregate
+  # baseline of "normal occupancy" for the space (never a profile of any
+  # named individual) and flags live activity that doesn't resemble it as
+  # a potential intrusion; never raw biometrics, never presented as a
+  # verdict about who is present — only a similarity-scored expected/
+  # anomalous read.
+  anomaly_similarity_threshold: 0.6   # below this, live activity is flagged "anomalous"
+  live_window_minutes: 30             # recent-history window used to build the live signature
   feature_weights:
-    hourly_activity: 0.5            # cosine similarity of 24-bucket activity histograms
-    presence_ratio: 0.3             # closeness of overall active-fraction
-    session_length: 0.2             # closeness of mean contiguous-presence duration
+    hourly_activity: 0.5              # cosine similarity of 24-bucket activity histograms
+    presence_ratio: 0.3               # closeness of overall active-fraction
+    session_length: 0.2               # closeness of mean contiguous-activity duration
+
+wellness:
+  # Personal activity self-experiment — see src/wellness/. Strictly opt-in
+  # and single-person: run by you, on yourself, to see whether the board's
+  # existing motion sensor can say anything useful about movement vs.
+  # stillness over time. Derives daily summaries (active/sedentary minutes,
+  # longest still streak, movement sessions) and flags shifts worth a look —
+  # informational only, never a diagnosis, never shared or compared between
+  # people, never leaves the board (data/wellness_*.jsonl).
+  recent_window_days: 7        # "how have the last week's recorded days looked"
+  baseline_window_days: 21     # ...compared against this many recorded days before that
+  min_days_per_window: 3       # below this on either side, report insufficient_data rather than guess
+  trend_alert_minutes: 30.0    # average daily delta (minutes) that counts as a notable shift
 
 lora:
   rank: 8

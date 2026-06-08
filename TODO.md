@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration/identity stacks + API wiring implemented and tested
+Last updated: 2026-06-08 — Phase 1 ingestion/knowledge/model/exploration/security/wellness stacks + API wiring implemented and tested (security module redesigned from per-person identity matching to occupancy-baseline anomaly detection; wellness module added as a strictly opt-in, single-person personal-activity self-experiment)
 
 ## Phase 1 — Local MVP (single machine, ~10 sensors)
 
@@ -38,23 +38,53 @@ Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration/ident
 - [x] `src/exploration/outcomes.py` — log results to `data/experiment_outcomes.jsonl`; forwards non-inconclusive outcomes as labeled examples to `training.labeled_examples_path` + `labeled_examples` event
 - [x] `tests/exploration/` — 22 tests across hypothesis_generator, experiments, outcomes, scheduler
 
-### Identity / opt-in person registration
+### Security / occupancy-baseline anomaly detection
 
-Ambient-sensor occupancy attribution, scoped deliberately to stay out of
-biometric-surveillance territory: no cameras/microphones, no faceprints or
-voiceprints, no inference of protected attributes (sex/age/health). A person
-who *wants* to be recognized consciously registers their own behavioral
-*routine* (presence timing/activity level/session length, derived from the
-existing PIR/DHT22/CO2 sensors) and is later matched against it with an
-honestly-reported confidence — "whose routine does this look like", never
-"who is this person". Revocation is a hard purge of profile + match history.
-- [x] `src/identity/signature.py` — pure aggregation: `build_signature` derives `presence_ratio`, `hourly_activity` (24-bucket histogram), `mean_session_length_min` from a chronological motion-reading window
-- [x] `src/identity/store.py` — JSONL I/O for `data/identity_profiles.jsonl` / `data/identity_matches.jsonl`, mirroring `beliefs.py`'s read/append/rewrite helpers
-- [x] `src/identity/matcher.py` — `score_match` (config-driven weighted similarity, mirrors `compute_rag_confidence`'s pure-scoring shape), `match` (best-match vs. honest `"unknown"` fallback below `identity.match_confidence_threshold`), `run_live_match` (I/O glue + `identity_matched` event); CLI `--match` / `--watch [--interval N]`
-- [x] `src/identity/registration.py` — `register` (build + persist a signature over a consciously-opened window, `identity_registered` event), `revoke` (**hard delete** — purges the profile AND every match record referencing it, `identity_revoked` event), `list_profiles`; CLI `--register NAME --duration N` / `--revoke ID` / `--list`
-- [x] Wired `POST /identity/register`, `POST /identity/revoke/{id}`, `GET /identity/profiles`, `GET /identity/match` into `src/api/main.py`
-- [x] Privacy guardrails made structural, not just documented: `data/identity_*.jsonl` covered by `.gitignore`'s `data/*.jsonl`; `adapter_sync.py`'s push path is hardcoded to `training.labeled_examples_path` only (cannot glob identity data to the external training host)
-- [x] `tests/identity/` — tests across signature, matcher, registration (incl. the hard-delete purge guarantee and event-bus publish assertions)
+Ambient-sensor intrusion detection, scoped deliberately to stay out of
+biometric-/identification-surveillance territory: no cameras/microphones, no
+faceprints or voiceprints, no per-person profiles, no inference of protected
+attributes (sex/age/health). The system learns exactly *one* aggregate
+**occupancy baseline** — what normal activity timing/level/session-length
+looks like for the space (derived from the existing PIR/DHT22/CO2 sensors)
+— and compares live activity against it with an honestly-reported similarity
+score: "does this look like the usual pattern here", never "who is this
+person". A reset is a hard purge of the baseline + alert history.
+
+(Renamed and redesigned from the earlier "identity / opt-in person
+registration" plan — that design matched live activity against named,
+per-person profiles, which on reflection was an identification system with
+extra steps. This redesign keeps the same sensor-aggregation math but drops
+named profiles entirely in favor of one space-level baseline + anomaly
+flagging, which is what an intrusion-detection use case actually needs.)
+- [x] `src/security/signature.py` — pure aggregation: `build_signature` derives `presence_ratio`, `hourly_activity` (24-bucket histogram), `mean_session_length_min` from a chronological motion-reading window
+- [x] `src/security/store.py` — JSONL I/O for `data/occupancy_baseline.jsonl` / `data/occupancy_alerts.jsonl`, mirroring `beliefs.py`'s read/append/rewrite helpers
+- [x] `src/security/detector.py` — `score_similarity` (config-driven weighted similarity, mirrors `compute_rag_confidence`'s pure-scoring shape), `detect` (`expected` / `anomalous` / `no_baseline` against `security.anomaly_similarity_threshold`), `run_live_check` (I/O glue + `occupancy_checked` / `occupancy_anomaly_detected` events); CLI `--check` / `--watch [--interval N]`
+- [x] `src/security/learner.py` — `learn_baseline` (build + persist a baseline over an observed calibration window, `occupancy_baseline_learned` event), `reset_baseline` (**hard delete** — purges the baseline AND every alert record, `occupancy_baseline_reset` event), `get_baseline`; CLI `--learn --duration N` / `--reset` / `--show`
+- [x] Wired `POST /security/baseline/learn`, `POST /security/baseline/reset`, `GET /security/baseline`, `GET /security/check` into `src/api/main.py`
+- [x] Privacy guardrails made structural, not just documented: `data/occupancy_*.jsonl` covered by `.gitignore`'s `data/*.jsonl`; `adapter_sync.py`'s push path is hardcoded to `training.labeled_examples_path` only (cannot glob occupancy data to the external training host)
+- [x] `tests/security/` — tests across signature, detector, learner (incl. the hard-delete purge guarantee and event-bus publish assertions)
+
+### Wellness / personal activity self-experiment
+
+A different *kind* of opt-in than the security module's: this one is run by
+one person, on themselves, for themselves — a personal experiment in whether
+the board's existing motion sensor can say anything informative about
+movement vs. stillness over time (sedentary minutes, longest still streak,
+movement sessions, and how those shift week to week). It deliberately does
+**not** build a profile to compare anyone *against* — there is no baseline
+"of a person" here, only a private diary of one's own days that the person
+who generated it owns outright, including the right to wipe it completely.
+It never diagnoses, never claims medical authority, and never leaves the
+board — same structural guardrails as the security module's occupancy data,
+applied to data that is, if anything, more personal.
+
+- [x] `src/wellness/metrics.py` — pure aggregation: `build_daily_summary` derives `active_minutes` / `sedentary_minutes` (always summing to the window length), `longest_sedentary_streak_min`, `activity_sessions`, `mean_session_length_min` from a chronological motion-reading window plus its [start, end) bounds
+- [x] `src/wellness/store.py` — JSONL I/O for `data/wellness_daily.jsonl` / `data/wellness_trends.jsonl`, mirroring `beliefs.py`'s / `security/store.py`'s read/append/rewrite helpers
+- [x] `src/wellness/tracker.py` — `record_day` (build + persist one UTC calendar day's summary, `wellness_day_recorded` event), `get_recent_days`, `reset_history` (**hard delete** — purges every recorded day AND every trend check, `wellness_history_reset` event); CLI `--record [--day YYYY-MM-DD]` / `--reset` / `--show [--days N]`
+- [x] `src/wellness/trends.py` — `score_trend` (signed average-per-day deltas between a recent window and the window before it, mirrors `detector.score_similarity`'s pure-scoring shape), `detect_trend` (`stable` / `more_sedentary` / `more_active` / `insufficient_data` against `wellness.trend_alert_minutes`), `run_trend_check` (I/O glue + `wellness_trend_checked` / `wellness_risk_flagged` events); CLI `--check`
+- [x] Wired `POST /wellness/day/record`, `GET /wellness/days`, `GET /wellness/trend`, `POST /wellness/reset` into `src/api/main.py`
+- [x] Privacy guardrails made structural, matching the security module: `data/wellness_*.jsonl` covered by `.gitignore`'s `data/*.jsonl`; `adapter_sync.py`'s push path is hardcoded to `training.labeled_examples_path` only (cannot glob this person's activity history to the external training host)
+- [x] `tests/wellness/` — tests across metrics, tracker, trends (incl. the hard-delete purge guarantee, the active+sedentary-minutes-sum-to-window-length invariant, and event-bus publish assertions)
 
 ### Training & adapter sync
 

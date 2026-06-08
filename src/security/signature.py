@@ -1,13 +1,13 @@
 """
-Behavioral routine signatures — pure aggregation over the ambient sensor
+Occupancy-pattern signatures — pure aggregation over the ambient sensor
 history the board already collects (PIR motion, DHT22 temp/humidity, MQ-135
 CO2). No new hardware, no biometrics, no cameras/microphones.
 
-A signature answers "what does this person's *routine* look like" — when
-they're typically present, how active, how long their sessions run — never
-"who is this person". The same function builds both a long-window
-registration signature and a short-window live signature so the matcher
-compares like with like (see matcher.score_match).
+A signature answers "what does occupancy of this space normally look like" —
+when it's typically active, how active, how long active stretches run — never
+"who is here". The same function builds both the long-window learned baseline
+and the short-window live signature so the detector compares like with like
+(see detector.score_similarity).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _hourly_activity(motion_readings: list[TelemetryReading]) -> list[float]:
     """24-bucket histogram (hour-of-day -> fraction of that hour's readings
     that were "active"), normalized so the buckets sum to 1.0. An empty or
     all-quiet history yields a flat (uniform) histogram — "no information",
-    not "definitely absent every hour"."""
+    not "definitely inactive every hour"."""
     totals = [0] * HOURS_IN_DAY
     actives = [0] * HOURS_IN_DAY
     for r in motion_readings:
@@ -60,8 +60,8 @@ def _presence_ratio(motion_readings: list[TelemetryReading]) -> float:
 def _session_lengths_min(motion_readings_chronological: list[TelemetryReading]) -> list[float]:
     """Lengths (in minutes) of contiguous active stretches — consecutive
     "active" readings no more than MAX_SESSION_GAP_MIN apart collapse into
-    one session, mirroring how a person's presence is one continuous visit
-    rather than a series of independent instants."""
+    one session, mirroring how a single visit shows up as one continuous
+    stretch of activity rather than a series of independent instants."""
     sessions: list[float] = []
     session_start: datetime | None = None
     last_active: datetime | None = None
@@ -89,16 +89,16 @@ def _mean_session_length_min(motion_readings_chronological: list[TelemetryReadin
 
 
 def build_signature(motion_readings: list[TelemetryReading]) -> dict:
-    """Build a JSON-serializable behavioral-routine feature set from one
+    """Build a JSON-serializable occupancy-pattern feature set from one
     sensor's motion readings, in chronological order (oldest first) —
     callers querying TimeSeriesStore (which returns most-recent-first) must
     reverse before passing in here.
 
     Motion is the load-bearing signal — the only direct presence proxy among
-    the board's sensors. The same function builds both a long-window
-    registration signature and a short-window live signature; the caller
-    (which already needs the sensor registry to find the motion sensor's id)
-    is responsible for selecting and windowing the stream."""
+    the board's sensors. The same function builds both the long-window
+    learned baseline and the short-window live signature; the caller (which
+    already needs the sensor registry to find the motion sensor's id) is
+    responsible for selecting and windowing the stream."""
     return {
         "presence_ratio": round(_presence_ratio(motion_readings), 4),
         "hourly_activity": [round(v, 4) for v in _hourly_activity(motion_readings)],

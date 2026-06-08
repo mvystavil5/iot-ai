@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from src.identity import signature as sig
+from src.security import signature as sig
 from src.ingestion.schema import TelemetryReading
 
 
@@ -19,7 +19,7 @@ def test_build_signature_empty_history_yields_uniform_flat_signature():
     assert result["presence_ratio"] == 0.0
     assert result["mean_session_length_min"] == 0.0
     assert result["sample_size"] == 0
-    # "no information" is represented as a flat histogram, not "definitely absent"
+    # "no information" is represented as a flat histogram, not "definitely inactive"
     assert result["hourly_activity"] == [round(1.0 / 24, 4)] * 24
 
 

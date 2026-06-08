@@ -5,7 +5,11 @@
       "PowerShell(head *)",
       "WebFetch(domain:docs.arduino.cc)",
       "WebFetch(domain:store.arduino.cc)",
-      "Bash(mkdir -p tests/ingestion)"
+      "Bash(mkdir -p tests/ingestion)",
+      "Bash(rm -rf src/identity tests/identity)",
+      "Bash(mkdir -p \"D:\\\\iot-ai\\\\tests\\\\security\")",
+      "Bash(mkdir -p src/wellness tests/wellness)",
+      "Bash(touch src/wellness/__init__.py tests/wellness/__init__.py)"
     ]
   }
 }

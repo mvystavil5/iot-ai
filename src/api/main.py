@@ -1,11 +1,14 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.exploration import scheduler
-from src.identity import registration
-from src.identity.matcher import run_live_match
+from src.security import learner
+from src.security.detector import run_live_check
+from src.wellness import tracker
+from src.wellness.trends import run_trend_check
 from src.ingestion.pipeline import IngestionError, IngestionPipeline
 from src.model.beliefs import BeliefStore
 from src.model.reasoner import Reasoner
@@ -69,47 +72,92 @@ async def run_experiment():
     }
 
 
-class IdentityRegisterPayload(BaseModel):
-    display_name: str
+class LearnBaselinePayload(BaseModel):
     duration_s: int = 3600
 
 
-@app.post("/identity/register")
-async def register_identity(payload: IdentityRegisterPayload):
-    """Register a routine signature over the trailing `duration_s` of
-    already-collected history — a deliberate adaptation of
-    registration.py's CLI flow (which blocks until a *future* window
-    elapses): an HTTP handler can't hold a request open for up to an hour.
-    Consent is still explicit and immediate — the caller chooses, right now,
-    to have their recent routine become their profile."""
+@app.post("/security/baseline/learn")
+async def learn_security_baseline(payload: LearnBaselinePayload):
+    """Learn a fresh occupancy baseline over the trailing `duration_s` of
+    already-collected history — a deliberate adaptation of learner.py's CLI
+    flow (which blocks until a *future* window elapses): an HTTP handler
+    can't hold a request open for up to an hour. The result is one aggregate
+    "what does normal occupancy look like" signature for the space — never a
+    profile of any specific person."""
     end = datetime.now(timezone.utc)
     start = end - timedelta(seconds=payload.duration_s)
-    profile = registration.register(payload.display_name, start, end)
+    baseline = learner.learn_baseline(start, end)
     return {
-        "profile_id": profile["profile_id"],
-        "display_name": profile["display_name"],
-        "consent_at": profile["consent_at"],
-        "sample_size": profile["signature"]["sample_size"],
+        "baseline_id": baseline["baseline_id"],
+        "learned_at": baseline["learned_at"],
+        "sample_size": baseline["signature"]["sample_size"],
     }
 
 
-@app.post("/identity/revoke/{profile_id}")
-async def revoke_identity(profile_id: str):
-    if not registration.revoke(profile_id):
-        raise HTTPException(status_code=404, detail=f"No active profile with id {profile_id!r}")
-    return {"status": "revoked", "profile_id": profile_id}
+@app.post("/security/baseline/reset")
+async def reset_security_baseline():
+    if not learner.reset_baseline():
+        raise HTTPException(status_code=404, detail="No baseline or alert history to reset")
+    return {"status": "reset"}
 
 
-@app.get("/identity/profiles")
-async def list_identity_profiles():
-    return {"profiles": registration.list_profiles()}
+@app.get("/security/baseline")
+async def get_security_baseline():
+    baseline = learner.get_baseline()
+    if baseline is None:
+        return {"baseline": None}
+    return {"baseline": {
+        "baseline_id": baseline["baseline_id"],
+        "learned_at": baseline["learned_at"],
+        "sample_size": baseline["signature"]["sample_size"],
+    }}
 
 
-@app.get("/identity/match")
-async def get_identity_match():
-    """Always returns a confidence score alongside the guess — never
-    presented as fact (see matcher.match's honest "unknown" fallback)."""
-    return run_live_match()
+@app.get("/security/check")
+async def get_security_check():
+    """Always returns a similarity score alongside the status — never
+    presented as a verdict about who is present (see detector.detect's
+    honest `expected` / `anomalous` / `no_baseline` statuses)."""
+    return run_live_check()
+
+
+class RecordWellnessDayPayload(BaseModel):
+    day: Optional[str] = None  # ISO date "YYYY-MM-DD"; defaults to yesterday (UTC)
+
+
+@app.post("/wellness/day/record")
+async def record_wellness_day(payload: RecordWellnessDayPayload):
+    """Aggregate one already-elapsed UTC calendar day of motion history into
+    a personal activity summary — strictly opt-in, single-person, run by you
+    on yourself (see src/wellness/tracker.py). Defaults to yesterday since a
+    day "in progress" can't yet be summarized honestly."""
+    target_day = date.fromisoformat(payload.day) if payload.day else (datetime.now(timezone.utc) - timedelta(days=1)).date()
+    try:
+        summary = tracker.record_day(target_day)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return summary
+
+
+@app.get("/wellness/days")
+async def get_wellness_days(limit: int = 30):
+    return {"days": tracker.get_recent_days(limit)}
+
+
+@app.get("/wellness/trend")
+async def get_wellness_trend():
+    """Compares your recent recorded days to the days before them — an
+    informational signal about *your own* movement over time, never a
+    diagnosis (see src/wellness/trends.py: `more_sedentary` / `more_active` /
+    `stable` / `insufficient_data`)."""
+    return run_trend_check()
+
+
+@app.post("/wellness/reset")
+async def reset_wellness_history():
+    if not tracker.reset_history():
+        raise HTTPException(status_code=404, detail="No wellness history to reset")
+    return {"status": "reset"}
 
 
 @app.get("/health")

@@ -7,7 +7,7 @@
 
 ## Abstract
 
-Standard AI language models are trained once on text from the internet and then frozen — they never learn anything new after training ends. This paper describes a different approach: a small AI system that continuously learns about the physical world by reading data from IoT (Internet of Things) sensors, like thermometers, motion detectors, and air quality monitors. The system builds up a living memory of its environment, forms hypotheses about how the world works, runs experiments to test those hypotheses, and gradually improves its own reasoning over time. It also includes an optional, strictly consent-based module that lets individuals choose to be recognized by their own daily routines — never by their face, voice, or any other biometric trait. We describe the architecture, each component's role, the learning methods used, the privacy choices behind the identity capability, and how the system can grow from a single laptop to a building-wide network.
+Standard AI language models are trained once on text from the internet and then frozen — they never learn anything new after training ends. This paper describes a different approach: a small AI system that continuously learns about the physical world by reading data from IoT (Internet of Things) sensors, like thermometers, motion detectors, and air quality monitors. The system builds up a living memory of its environment, forms hypotheses about how the world works, runs experiments to test those hypotheses, and gradually improves its own reasoning over time. It also includes an optional security capability that learns what "normal occupancy" of a space looks like from the same ambient sensors and flags activity that doesn't resemble it as a possible intrusion — never by identifying *who* is present, and never using a face, voice, or any other biometric trait. We describe the architecture, each component's role, the learning methods used, the privacy choices behind the anomaly-detection capability, and how the system can grow from a single laptop to a building-wide network.
 
 ---
 
@@ -118,7 +118,7 @@ The system is divided into five specialized **agents**. Each agent has a single 
 
 Each of these agents is described in detail in the sections below.
 
-Alongside this five-agent assembly line sits one more, optional capability: the **Identity module**. Unlike the agents above, it doesn't run automatically on every reading — it only switches on when a person explicitly chooses to take part, by *registering* their own routine. Section 11 explains how it works and, just as importantly, the careful boundaries around what it deliberately does not do.
+Alongside this five-agent assembly line sit two more, optional, opt-in capabilities. The **Security module** doesn't run automatically on every reading — it only starts flagging anomalies once the space has been *calibrated*: observed long enough to learn what its normal occupancy pattern looks like. Section 11 explains how it works and, just as importantly, the careful boundaries around what it deliberately does not do. The **Wellness module** is its mirror image: where Security stays deliberately aggregate and anonymous to protect people who never agreed to be observed, Wellness is a personal self-experiment — run by one person, on themselves, about themselves — in how much a plain motion sensor can say about movement and stillness over time. Section 12 explains both how it works and why that consent-driven framing is what makes it appropriate at all.
 
 ---
 
@@ -525,38 +525,38 @@ The RAG system retrieves from Level 1 and Level 2. Fine-tuning encodes Level 2 a
 
 ---
 
-## 11. The Identity Module: Whose Routine Is This — Not "Who Are You"
+## 11. The Security Module: Does This Look Like the Usual Pattern Here?
 
 ### A natural question, and why we slowed down before answering it
 
-Once a system can tell *whether* a room is occupied, the next question people usually ask is: can it tell *who* is in the room?
+Once a system can tell *whether* a room is occupied, the natural next step for a security use case is: can it tell whether the activity it's seeing looks like the people who normally occupy the space — or like someone who shouldn't be there?
 
-The obvious technical answer is "add a camera and run face recognition" — or a microphone and run voice recognition. We deliberately did not do that, and it's worth explaining why, because the reasoning shapes everything else in this part of the system.
+The obvious technical answer is "add a camera and run face recognition" — or a microphone and run voice recognition, then flag anyone whose face or voice doesn't match a stored list. We deliberately did not do that, and it's worth explaining why, because the reasoning shapes everything else in this part of the system.
 
-A face is not just a way to unlock your phone. It is a unique, lifelong identifier — a "faceprint" — and the moment a system can compute one, it has created exactly the kind of data that privacy laws around the world (GDPR in Europe, Illinois's BIPA, the EU AI Act, and others) single out for the strictest protection: *biometric identifiers*. The same is true of a voiceprint. Even labeling the output "Person A" instead of a real name changes nothing about what was captured — the underlying fingerprint can still re-identify a real human being, no matter what name is printed next to it. Building that kind of system, even casually, even for people who live in the house and would consent, crosses from "smart home automation" into "biometric surveillance" — a line worth respecting on purpose, not blurring by accident.
+A face is not just a way to unlock your phone. It is a unique, lifelong identifier — a "faceprint" — and the moment a system can compute one, it has created exactly the kind of data that privacy laws around the world (GDPR in Europe, Illinois's BIPA, the EU AI Act, and others) single out for the strictest protection: *biometric identifiers*. The same is true of a voiceprint, and arguably of any system whose job is to decide *which specific human* is standing in a room — even one that calls its outputs "Person A" instead of a real name, or scopes itself to "just the people who live here." Once you're matching live activity to a stored description of a specific individual in order to recognize them, you've built an identification system — and that's a different (and far more tightly regulated) thing than a security system that simply asks "does this look right for this space?"
 
-So we asked a different question instead: *is there a way to explore "who's probably here" that stays entirely within the kind of data the board already collects — motion, temperature, humidity, CO2 — and that only ever applies to people who choose, knowingly, to take part?*
+So we asked a narrower, more useful question instead: *is there a way to flag "this doesn't look like the usual pattern here" using only the kind of data the board already collects — motion, temperature, humidity, CO2 — without ever trying to work out who, specifically, is present?*
 
-That's what the Identity module is.
+That's what the Security module is.
 
-### The idea: recognize a routine, not a person
+### The idea: learn the rhythm of the space, not the people in it
 
-Think about how you can often tell who just came in the front door without even looking up — a familiar rhythm of footsteps, the time of day they usually arrive, how long they typically linger before heading to the kitchen. You're not running facial recognition in your head. You're recognizing a *pattern of behavior* you've come to associate with that person — and you hold the guess loosely, ready to be corrected.
+Think about a house with a regular routine — someone's usually moving around by 7, quiet through the workday, active again in the evening, lights out by 11. You don't need to know *who* is making that pattern to notice when it breaks: a stretch of activity at 3 AM, or motion in a room that's normally empty all day, stands out on its own. That instinct — "this doesn't match how this place usually behaves" — is the entire idea behind this module, made explicit and measurable.
 
-That's the entire idea behind this module, made explicit and measurable. For each person who chooses to take part, the system learns three simple things from the existing motion sensor:
+Rather than building a profile of any individual, the system learns **one aggregate baseline** describing what *normal occupancy of the space* looks like, from the existing motion sensor:
 
-- **What time of day are they usually active?** — a 24-hour activity profile ("mostly mornings and evenings on weekdays")
-- **How much of the time they're around are they actually moving?** — an overall activity level
-- **How long do their typical active stretches last?** — a few minutes of passing through, versus hours of working from home
+- **What time of day is the space usually active?** — a 24-hour activity profile ("mostly mornings and evenings on weekdays")
+- **How much of the time is something actually moving?** — an overall activity level
+- **How long do typical active stretches last?** — a few minutes of passing through, versus hours of continuous occupancy
 
-None of these require a camera. None of them are biometric. None of them can identify someone outside this one system, on this one device, to anyone who hasn't agreed to take part. We call this small bundle of statistics a **routine signature**, and it is the *only* thing this module ever stores about a person.
+None of these require a camera. None of them are biometric. None of them describe — or could describe — any specific person; they describe the *space*, the way a thermostat schedule describes a house's rhythm rather than any resident's. We call this small bundle of statistics an **occupancy baseline**, and it is the *only* thing this module ever learns and stores.
 
-### Step 1 — Registration: nothing happens without an explicit "yes"
+### Step 1 — Calibration: teaching the system what "normal" looks like
 
-The system never builds a routine signature for someone in the background. Building one requires a person to actively start a **registration window** — in effect, saying "starting now, learn my pattern for the next hour." During that window, the system watches the motion sensor it already has, and when the window closes, it distills everything it observed into a routine signature, stored locally and tagged with the name the person chose for themselves and the moment they consented.
+The system never has an opinion about what's normal until it's told to go learn one. Calibrating it means opening a **learning window** — "observe the space for the next hour (or day, or week) and learn its rhythm." During that window the system watches the motion sensor it already has, and when the window closes, it distills everything it observed into a baseline.
 
 ```
-Person says: "Register me as 'Person A' for the next hour."
+Operator says: "Learn the baseline for the next hour."
 
 The system observes (using a sensor that was already running):
   09:02  motion detected
@@ -565,70 +565,139 @@ The system observes (using a sensor that was already running):
   ...
   10:00  window closes
 
-It distills this into a routine signature:
+It distills this into an occupancy baseline:
   presence_ratio:           0.62   (active about 62% of the window)
   hourly_activity:          [a 24-number histogram — peaks near 9 AM,
                              quiet by 10 PM, ...]
   mean_session_length_min:  8.5    (active stretches run about 8 minutes)
 
 Stored as:
-  { profile_id: "person_a_470f29", display_name: "Person A",
-    consent_at: "2026-06-01T09:00:00Z", signature: {...},
-    revoked_at: null }
+  { baseline_id: "occupancy_baseline_470f29c1",
+    learned_at: "2026-06-01T09:00:00Z",
+    window: {...}, signature: {...} }
 ```
 
-That's the entire record: no image, no recording, no audio — three numbers and a histogram describing a pattern of comings and goings, attached to a name the person picked for their own profile.
+That's the entire record: no image, no recording, no audio, no name — three numbers and a histogram describing how the *space* tends to behave. Routines change — a new housemate, a schedule shift, a renovation — so re-running calibration simply learns a fresh baseline, which becomes the active one going forward.
 
-### Step 2 — Matching: an honest, confidence-scored guess
+### Step 2 — Live comparison: an honest, similarity-scored read
 
-From time to time, the system looks at roughly the last half hour of motion activity, builds the *same kind* of routine signature for that short recent window, and compares it against every registered signature using simple statistical similarity — not a language model, and not an AI "judgment call."
+From time to time, the system looks at roughly the last half hour of motion activity, builds the *same kind* of signature for that short recent window, and compares it against the learned baseline using simple statistical similarity — not a language model, and not an AI "judgment call."
 
 This is a deliberate choice worth pausing on. Comparing two short numerical patterns for similarity is a job for ordinary arithmetic, not for a large language model — the same call we made for the confidence scores in Section 6, where a calculator beats a chatbot at "how similar are these two numbers": faster, cheaper, and easier to explain.
 
-The comparison produces a confidence score between 0 and 1, and the system reports it honestly either way:
+The comparison produces a similarity score between 0 and 1, and the system reports it honestly either way:
 
 ```
-Best match: "Person A" — confidence 0.92  →  "This looks like Person A's routine"
-Best match: "Person A" — confidence 0.38  →  "unknown occupant" (too uncertain to report)
+similarity 0.92  →  "expected"   — this matches how the space usually behaves
+similarity 0.38  →  "anomalous"  — this doesn't look like the usual pattern here
+(no baseline)    →  "no_baseline" — nothing learned yet to compare against
 ```
 
-If the live pattern doesn't resemble *any* registered routine closely enough, the system says so plainly — **"unknown occupant"** — rather than forcing a guess. That same honest "I don't recognize this pattern" is, not coincidentally, also exactly the signal that something — or someone — new has shown up.
+If the live pattern doesn't resemble the learned baseline closely enough, the system says so plainly — **"anomalous"** — and that's exactly the signal worth raising an alert on: an unfamiliar visitor, an unexpected hour, a pattern that simply doesn't fit. The system never claims to know *who* caused it. It only ever reports that something about *right now* doesn't look like *usual*.
 
-### Step 3 — Revocation: leaving is as complete as joining
+### Step 3 — Resetting: a clean slate when the rhythm changes
 
-Anyone who registered can ask to be forgotten at any time, for any reason, no questions asked. And "forgotten" means exactly that: the system doesn't simply mark the profile inactive while quietly keeping the data around. It performs a **hard delete** — it removes the routine signature itself, *and* it walks back through the entire history of match results and removes every single record that ever referenced that person, so that no trace of them remains anywhere on the device.
+An operator can reset the baseline at any time — for example, after a household composition change makes the old "normal" stale. Resetting is a **hard delete**: it doesn't quietly mark the old baseline inactive while leaving it (and its alert history) sitting on disk. It purges the learned baseline *and* every anomaly-check record ever scored against it, so recalibration starts from a genuinely clean slate rather than a mix of old and new assumptions.
 
 ```
-Before revoking "Person A":
-  identity_profiles.jsonl:  [ Person A's signature ]
-  identity_matches.jsonl:   [ "Person A" @ 09:15, "Person A" @ 14:02,
-                              "unknown occupant" @ 18:40 ]
+Before reset:
+  occupancy_baseline.jsonl: [ baseline learned 2026-05-01 ]
+  occupancy_alerts.jsonl:   [ "expected" @ 09:15, "expected" @ 14:02,
+                              "anomalous" @ 02:40 ]
 
-After revoking "Person A":
-  identity_profiles.jsonl:  [ ]
-  identity_matches.jsonl:   [ "unknown occupant" @ 18:40 ]
+After reset:
+  occupancy_baseline.jsonl: [ ]
+  occupancy_alerts.jsonl:   [ ]
 ```
 
-We think this distinction — a real purge versus a flag that quietly leaves the underlying data intact — is the difference between a *consent* system and surveillance with extra steps. So it's the first thing revocation does, not an afterthought bolted on later.
+We think this distinction — a real purge versus a flag that quietly leaves the underlying data intact — matters here for the same reason it mattered when this module dealt with personal profiles: a system that claims to forget should actually forget. So it's the first thing reset does, not an afterthought bolted on later.
 
 ### Step 4 — It never leaves the device, and that's enforced, not just promised
 
-Section 8 described how the system periodically sends *labeled examples* — confirmed lessons about sensor patterns — to a separate machine for deeper training. It would be easy to assume identity data might get swept up in that process by accident. It can't: that export step reads from exactly one configured file path (the labeled-examples log) and nothing else. There is no step anywhere that scans "everything in the data folder" and ships it out, so routine signatures and match histories simply aren't reachable from that path — structurally, not by policy. The same files are also excluded from the project's version-control history, so they can never end up copied into a code repository either.
+Section 8 described how the system periodically sends *labeled examples* — confirmed lessons about sensor patterns — to a separate machine for deeper training. It would be easy to assume occupancy data might get swept up in that process by accident. It can't: that export step reads from exactly one configured file path (the labeled-examples log) and nothing else. There is no step anywhere that scans "everything in the data folder" and ships it out, so the baseline and alert history simply aren't reachable from that path — structurally, not by policy. The same files are also excluded from the project's version-control history, so they can never end up copied into a code repository either.
 
 ### What this module deliberately does *not* do
 
 To be precise about the boundary we drew:
 
 - It does **not** use a camera, a microphone, or any biometric sensor of any kind.
-- It does **not** attempt to determine — and could not determine, even if asked — anything about a person's sex, age, health, or any other personal characteristic.
-- It does **not** produce anything that could identify a person to anyone outside this one system; "Person A" is a name someone chose for their own profile on their own device, not a durable identifier that follows them anywhere else.
-- It does **not** run, store, or learn anything about anyone who hasn't explicitly opted in. There is no passive "background profiling" mode — registration is the only door in, and it only opens from the inside.
+- It does **not** attempt to determine — and could not determine, even if asked — *who* is present, or anything about a person's sex, age, health, or any other personal characteristic.
+- It does **not** build, store, or compare any profile of a specific individual. There is exactly one baseline, and it describes the space, not a person.
+- It does **not** run a passive "build a profile of whoever walks by" mode. Calibration only ever produces one aggregate description of the space's normal rhythm — never a roster of identified occupants.
 
-In short: the question this module answers is *"whose routine does this look like"* — a soft, probabilistic, revocable guess about a pattern someone chose to share — never *"who is this person."* That distinction is the whole point of the design.
+In short: the question this module answers is *"does this look like the usual pattern for this space"* — a soft, probabilistic, similarity-scored read that's just as useful for catching an intruder as the old design's per-person matching would have been, without ever taking on the burden (or the risk) of deciding who anyone is. That distinction is the whole point of the design.
 
 ---
 
-## 12. Scaling: From a Laptop to a Building
+## 12. The Wellness Module: A Personal Experiment in What Simple Sensors Can Tell You About Yourself
+
+### A different kind of opt-in
+
+Section 11 drew a careful line: the system should never try to figure out *who* is in a room, because doing so edges into biometric identification regardless of how the feature is framed. That line exists to protect *other* people — housemates, guests, anyone who didn't choose to be watched.
+
+This module is the other side of that line. It exists for the one case where there's no one else to protect from the system's curiosity: when the person being observed *is* the person asking the questions, about themselves, on hardware they own, for their own reasons. That's not a loophole in the privacy design — it's the whole reason the design draws its line where it does. Consenting to learn about yourself, from your own sensors, is categorically different from a system inferring things about people who never agreed to be its subject.
+
+The motivating question is simple and a little playful: *the board is already watching one room with a plain motion sensor — can that alone say anything real about how much a person moves through their day, and whether that's changing?* Wearables already do something like this with accelerometers pressed against skin. Could a $5 PIR sensor mounted on a wall do even a rough version of the same thing, with zero new hardware and zero data ever leaving the building? That's the experiment.
+
+### What it actually measures — and is careful not to claim
+
+Once a day (by default, the day that just finished — a day "in progress" can't be honestly summarized yet), the module looks back over the motion sensor's history for that [00:00, 24:00) UTC window and distills it into a small daily summary:
+
+- **Active minutes vs. sedentary minutes** — how much of the day saw movement, versus none. These two numbers always add up to the full day; "sedentary" here just means *the sensor saw nothing*, which is an honest description of the *signal*, not a claim about what the person was actually doing. Sitting at a desk, lying down, sleeping, and simply being in another room all look identical to a single PIR sensor — and the module says so plainly, rather than pretending otherwise.
+- **Longest still streak** — the single longest unbroken stretch with no detected movement that day.
+- **Activity sessions and their average length** — how many distinct stretches of movement there were, and roughly how long each one ran (using the same contiguous-stretch grouping as the security module's session detection — see Section 11).
+
+That's the entire vocabulary. There is no attempt to infer steps, heart rate, sleep stages, posture, or any clinical measure — the sensor simply cannot support those claims, and a system that pretended otherwise would be lying to the one person trusting it with their own data.
+
+### Step 1 — Recording: one day at a time
+
+```
+Operator (or a daily scheduled job) runs:
+  python -m src.wellness.tracker --record
+
+The system:
+  1. Looks back over yesterday's motion-sensor history (00:00–24:00 UTC)
+  2. Groups it into contiguous active stretches, the same way the
+     security module groups occupancy sessions
+  3. Computes active/sedentary minutes, the longest still streak, and
+     session statistics
+  4. Appends the summary to data/wellness_daily.jsonl and publishes
+     `wellness_day_recorded`
+```
+
+Each day becomes one small, self-contained record — a private diary entry written by the sensor, owned outright by the person it describes.
+
+### Step 2 — Trends: noticing shifts, without diagnosing them
+
+A single day says little; a *shift* over weeks might say something. Once enough days have accumulated, `python -m src.wellness.trends --check` compares the most recent stretch (seven days, by default) against the stretch immediately before it (three weeks, by default) and reports the *signed average difference* — "lately, you've had on average 60 more sedentary minutes per day, and your longest still streak has grown by 4 hours" — classified into one of four honest reads:
+
+- **`stable`** — nothing notable; the recent days look like the days before them
+- **`more_sedentary`** — recent days show meaningfully more still time or longer still streaks (publishes `wellness_risk_flagged` — "might be worth a look", deliberately phrased as exactly that and nothing stronger)
+- **`more_active`** — the opposite shift
+- **`insufficient_data`** — too few recorded days on either side to say anything honest yet; the system would rather admit it doesn't know than force a verdict from three days of data
+
+Note what's conspicuously absent from that list: there is no "at risk", no "unhealthy", no severity score, no recommendation. The honest output of arithmetic over two short lists of numbers is a *number*, not a medical opinion — and dressing it up as one would manufacture false authority out of a $5 sensor and a mean() call. If the trend is worth understanding, that's a conversation for a person and a professional, not an algorithm. This module's job ends at "here's what the numbers did"; what they *mean*, if anything, is deliberately left to the only person qualified to interpret them in context — the one they're about.
+
+### Step 3 — Resetting: the same hard-delete guarantee, for the most personal data on the board
+
+`python -m src.wellness.tracker --reset` purges every recorded day **and** every trend check ever computed from them — `data/wellness_daily.jsonl` and `data/wellness_trends.jsonl` are truncated to nothing, and `wellness_history_reset` is published so any future consumer knows to drop its own derived state too. This is the same hard-delete standard Section 11 set for occupancy resets, applied here without exception — if anything, this module's data deserves it *more*, not less, because it's the most personal thing the board ever derives.
+
+### Step 4 — It never leaves the device, either
+
+`data/wellness_daily.jsonl` and `data/wellness_trends.jsonl` get exactly the same structural protection as the occupancy files: they're covered by the project's blanket `data/*.jsonl` git-ignore rule, and the adapter-sync process that occasionally exports *labeled training examples* to an external host reads from one hardcoded config path and nothing else — there is no "scan the data folder" step anywhere that could sweep this up by accident. The numbers a person learns about their own movement stay exactly where they were generated: on the device that generated them, under the control of the person they describe.
+
+### Why this belongs in the same project as the security module
+
+It might seem strange that a single project contains both "never try to identify a person" (Section 11) and "here's a tool for studying yourself in detail" (this section). But they're not in tension — they're the same principle, viewed from both sides:
+
+- The security module exists to protect people *who never agreed to be observed* — so it deliberately limits itself to aggregate, anonymous, space-level statistics, and refuses to build anything that could describe an individual.
+- The wellness module exists for the *one* person who *did* agree — explicitly, actively, about themselves — so it can be as detailed and personal as that person finds useful, because consent is the entire difference between "a system that helps you understand yourself" and "a system that watches you."
+
+Put differently: the question that decides whether a feature like this is appropriate was never *"can the sensors support it?"* — it's *"who chose this, and who does it describe?"* When those are the same person, by their own free choice, on their own hardware, the calculus changes completely. That's the boundary this whole project is built around, and this module is what sits squarely on the *permitted* side of it.
+
+---
+
+## 13. Scaling: From a Laptop to a Building
 
 The system is designed to grow without requiring a rewrite. Every major component can be swapped for a larger equivalent by changing a single configuration file (`config/model.yaml`).
 
@@ -671,7 +740,7 @@ Once enough data and labeled examples have accumulated across many buildings, th
 
 ---
 
-## 13. Design Choices and Trade-offs
+## 14. Design Choices and Trade-offs
 
 | Decision | What we chose | What we gave up |
 |---|---|---|
@@ -689,7 +758,7 @@ Every "what we gave up" column is recoverable — the system is designed so that
 
 ---
 
-## 14. Open Research Questions
+## 15. Open Research Questions
 
 This project sits at the intersection of several active research areas. Here are the most interesting unsolved problems:
 
@@ -710,7 +779,7 @@ Even belief summaries can leak private information (if a building's belief is "o
 
 ---
 
-## 15. Conclusion
+## 16. Conclusion
 
 We have described a system that turns a stream of raw sensor readings into a continuously-improving understanding of a physical environment. The key ideas are:
 
@@ -738,23 +807,24 @@ The result is a system that starts tiny, learns continuously, and gradually deve
 |---|---|
 | Agent | An autonomous software component with a specific role, capable of using tools and making decisions |
 | Arduino UNO Q | A hybrid single-board computer combining a real-time STM32 microcontroller and a quad-core ARM Linux processor on one board |
-| Behavioral routine signature | A small bundle of statistics (how often someone is active, what times of day, how long their active stretches last) describing a person's pattern of presence — derived only from existing ambient sensors, never from cameras, microphones, or any biometric data |
+| Occupancy baseline | A small bundle of statistics (how often the space is active, what times of day, how long active stretches last) describing the *space's* normal pattern of activity — never a profile of any individual — derived only from existing ambient sensors, never from cameras, microphones, or any biometric data |
 | Belief | A structured claim the model holds about the world, with an associated confidence score |
 | ChromaDB | An open-source vector database that runs in-process (no server needed) |
 | Concept drift | When the statistical properties of incoming data change over time, making old beliefs invalid |
 | Continual learning | The ability of a model to keep learning from new data without forgetting what it already knows |
+| Daily activity summary | The wellness module's per-day record — active/sedentary minutes, longest still streak, and movement-session statistics derived from one calendar day of motion-sensor history; owned outright by the one person it describes |
 | Embedding | A fixed-length vector of numbers that represents the meaning of a piece of text |
 | EIG | Expected information gain — how much a hypothesis, if tested, would reduce overall uncertainty |
 | FedAvg | Federated Averaging — a technique for combining model updates from multiple devices without sharing raw data |
 | Fine-tuning | Updating a pre-trained model's weights on a new, smaller dataset |
 | Foundation model | A large model trained on broad data that serves as a starting point for specialized applications |
-| Hard delete (purge) | Removing a record completely — and every trace of it elsewhere — rather than just flagging it as inactive while quietly keeping the underlying data; the standard this project holds identity revocation to |
+| Hard delete (purge) | Removing a record completely — and every trace of it elsewhere — rather than just flagging it as inactive while quietly keeping the underlying data; the standard this project holds both occupancy-baseline resets and wellness-history resets to |
 | IoT | Internet of Things — physical devices that collect and transmit data over the internet |
 | Labeled example | A training record: an input paired with the correct output |
 | LoRA | Low-Rank Adaptation — a parameter-efficient fine-tuning method that only trains a small number of additional weights |
 | MQTT | Message Queuing Telemetry Transport — a lightweight protocol for sensor-to-server communication |
 | Ollama | A tool for running open-source language models locally on your own machine |
-| Opt-in registration | The consent mechanism by which a person knowingly and explicitly chooses to have the system learn their own behavioral routine signature — nothing is learned about anyone who hasn't taken this step |
+| Calibration window | An observation period during which the security module watches the space's existing motion sensor and learns its occupancy baseline; re-running it replaces the active baseline with a freshly learned one |
 | Outlier | A sensor reading that falls outside the sensor's expected range, possibly indicating a fault |
 | Pydantic | A Python library for defining and validating data schemas |
 | RAG | Retrieval-Augmented Generation — answering questions by first retrieving relevant context, then generating a response |
@@ -766,6 +836,7 @@ The result is a system that starts tiny, learns continuously, and gradually deve
 | USB CDC | USB Communications Device Class — makes a microcontroller appear as a virtual serial port to the host operating system |
 | Telemetry | Data automatically collected and transmitted from remote sensors |
 | Time-series database | A database optimized for storing and querying data points indexed by time |
+| Trend check | The wellness module's comparison of a person's recent daily activity summaries against the period before them, classified as `stable` / `more_sedentary` / `more_active` / `insufficient_data` — an arithmetic observation about minutes, never a diagnosis |
 | Vector store | A database optimized for storing and searching embedding vectors |
 | Weight | A numerical parameter inside a neural network that is adjusted during training |
 
@@ -810,10 +881,15 @@ ai-setup/
     │   ├── rag_confidence.py  RAG-derived confidence scoring
     │   └── ...             RAG chain, reasoner, belief tracker
     ├── exploration/        Hypothesis generation and experiments
-    ├── identity/           Opt-in routine registration & matching (Section 11)
-    │   ├── signature.py      Builds behavioral routine signatures from motion history
-    │   ├── matcher.py        Confidence-scored matching against registered routines
-    │   ├── registration.py   Register / revoke (hard delete) / list profiles
-    │   └── store.py          Local-only JSONL storage for profiles & match history
+    ├── security/           Occupancy-baseline anomaly detection (Section 11)
+    │   ├── signature.py      Builds occupancy signatures from motion history
+    │   ├── detector.py       Similarity-scored comparison against the learned baseline
+    │   ├── learner.py        Learn / reset (hard delete) / get the active baseline
+    │   └── store.py          Local-only JSONL storage for the baseline & alert history
+    ├── wellness/           Personal activity self-experiment — opt-in, single-person (Section 12)
+    │   ├── metrics.py        Builds daily activity summaries from motion history
+    │   ├── tracker.py        Record / reset (hard delete) / list daily summaries
+    │   ├── trends.py         Compares recent days to prior days; flags shifts, never diagnoses
+    │   └── store.py          Local-only JSONL storage for daily summaries & trend checks
     └── api/                FastAPI HTTP layer
 ```

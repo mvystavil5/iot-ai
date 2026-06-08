@@ -10,9 +10,14 @@ Known topics (producer -> consumer):
   belief_invalidated reasoner         -> explorer
   labeled_examples   explorer         -> trainer
   model_updated      trainer          -> reasoner (model reload)
-  identity_registered identity registration -> (audit / future consumers)
-  identity_revoked   identity registration  -> (audit / future consumers)
-  identity_matched   identity matcher       -> (audit / future consumers)
+  occupancy_baseline_learned security learner  -> (audit / future consumers)
+  occupancy_baseline_reset   security learner  -> (audit / future consumers)
+  occupancy_checked          security detector -> (audit / future consumers)
+  occupancy_anomaly_detected security detector -> (alerting / future consumers)
+  wellness_day_recorded      wellness tracker  -> (audit / future consumers)
+  wellness_history_reset     wellness tracker  -> (audit / future consumers)
+  wellness_trend_checked     wellness trends   -> (audit / future consumers)
+  wellness_risk_flagged      wellness trends   -> (alerting / future consumers)
 
 Usage:
   from src.events import bus
