@@ -10,6 +10,9 @@ Known topics (producer -> consumer):
   belief_invalidated reasoner         -> explorer
   labeled_examples   explorer         -> trainer
   model_updated      trainer          -> reasoner (model reload)
+  identity_registered identity registration -> (audit / future consumers)
+  identity_revoked   identity registration  -> (audit / future consumers)
+  identity_matched   identity matcher       -> (audit / future consumers)
 
 Usage:
   from src.events import bus

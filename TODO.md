@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration stacks + API wiring implemented and tested (113 tests passing)
+Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration/identity stacks + API wiring implemented and tested
 
 ## Phase 1 — Local MVP (single machine, ~10 sensors)
 
@@ -37,6 +37,24 @@ Last updated: 2026-06-07 — Phase 1 ingestion/knowledge/model/exploration stack
 - [x] `src/exploration/experiments.py` — observation (trend-correlation over recent history), alert (expected_range breach check), and simulation (synthetic random-walk trend check) experiment runners — Phase 1 has no actuation hardware, so "active query" has no runner yet
 - [x] `src/exploration/outcomes.py` — log results to `data/experiment_outcomes.jsonl`; forwards non-inconclusive outcomes as labeled examples to `training.labeled_examples_path` + `labeled_examples` event
 - [x] `tests/exploration/` — 22 tests across hypothesis_generator, experiments, outcomes, scheduler
+
+### Identity / opt-in person registration
+
+Ambient-sensor occupancy attribution, scoped deliberately to stay out of
+biometric-surveillance territory: no cameras/microphones, no faceprints or
+voiceprints, no inference of protected attributes (sex/age/health). A person
+who *wants* to be recognized consciously registers their own behavioral
+*routine* (presence timing/activity level/session length, derived from the
+existing PIR/DHT22/CO2 sensors) and is later matched against it with an
+honestly-reported confidence — "whose routine does this look like", never
+"who is this person". Revocation is a hard purge of profile + match history.
+- [x] `src/identity/signature.py` — pure aggregation: `build_signature` derives `presence_ratio`, `hourly_activity` (24-bucket histogram), `mean_session_length_min` from a chronological motion-reading window
+- [x] `src/identity/store.py` — JSONL I/O for `data/identity_profiles.jsonl` / `data/identity_matches.jsonl`, mirroring `beliefs.py`'s read/append/rewrite helpers
+- [x] `src/identity/matcher.py` — `score_match` (config-driven weighted similarity, mirrors `compute_rag_confidence`'s pure-scoring shape), `match` (best-match vs. honest `"unknown"` fallback below `identity.match_confidence_threshold`), `run_live_match` (I/O glue + `identity_matched` event); CLI `--match` / `--watch [--interval N]`
+- [x] `src/identity/registration.py` — `register` (build + persist a signature over a consciously-opened window, `identity_registered` event), `revoke` (**hard delete** — purges the profile AND every match record referencing it, `identity_revoked` event), `list_profiles`; CLI `--register NAME --duration N` / `--revoke ID` / `--list`
+- [x] Wired `POST /identity/register`, `POST /identity/revoke/{id}`, `GET /identity/profiles`, `GET /identity/match` into `src/api/main.py`
+- [x] Privacy guardrails made structural, not just documented: `data/identity_*.jsonl` covered by `.gitignore`'s `data/*.jsonl`; `adapter_sync.py`'s push path is hardcoded to `training.labeled_examples_path` only (cannot glob identity data to the external training host)
+- [x] `tests/identity/` — tests across signature, matcher, registration (incl. the hard-delete purge guarantee and event-bus publish assertions)
 
 ### Training & adapter sync
 

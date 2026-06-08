@@ -38,6 +38,17 @@ beliefs:
   path: ./data/beliefs.jsonl
   invalidation_threshold: 0.7   # new belief must have confidence > this to invalidate old
 
+identity:
+  # Opt-in routine-attribution — see src/identity/. Matches "whose routine
+  # does this look like" against consciously-registered behavioral
+  # signatures; never raw biometrics, never presented as fact below threshold.
+  match_confidence_threshold: 0.6   # below this, report "unknown" rather than force a guess
+  live_window_minutes: 30           # recent-history window used to build the live signature
+  feature_weights:
+    hourly_activity: 0.5            # cosine similarity of 24-bucket activity histograms
+    presence_ratio: 0.3             # closeness of overall active-fraction
+    session_length: 0.2             # closeness of mean contiguous-presence duration
+
 lora:
   rank: 8
   alpha: 16

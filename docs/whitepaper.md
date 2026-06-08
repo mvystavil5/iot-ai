@@ -7,7 +7,7 @@
 
 ## Abstract
 
-Standard AI language models are trained once on text from the internet and then frozen — they never learn anything new after training ends. This paper describes a different approach: a small AI system that continuously learns about the physical world by reading data from IoT (Internet of Things) sensors, like thermometers, motion detectors, and air quality monitors. The system builds up a living memory of its environment, forms hypotheses about how the world works, runs experiments to test those hypotheses, and gradually improves its own reasoning over time. We describe the architecture, each component's role, the learning methods used, and how the system can grow from a single laptop to a building-wide network.
+Standard AI language models are trained once on text from the internet and then frozen — they never learn anything new after training ends. This paper describes a different approach: a small AI system that continuously learns about the physical world by reading data from IoT (Internet of Things) sensors, like thermometers, motion detectors, and air quality monitors. The system builds up a living memory of its environment, forms hypotheses about how the world works, runs experiments to test those hypotheses, and gradually improves its own reasoning over time. It also includes an optional, strictly consent-based module that lets individuals choose to be recognized by their own daily routines — never by their face, voice, or any other biometric trait. We describe the architecture, each component's role, the learning methods used, the privacy choices behind the identity capability, and how the system can grow from a single laptop to a building-wide network.
 
 ---
 
@@ -117,6 +117,8 @@ The system is divided into five specialized **agents**. Each agent has a single 
 ```
 
 Each of these agents is described in detail in the sections below.
+
+Alongside this five-agent assembly line sits one more, optional capability: the **Identity module**. Unlike the agents above, it doesn't run automatically on every reading — it only switches on when a person explicitly chooses to take part, by *registering* their own routine. Section 11 explains how it works and, just as importantly, the careful boundaries around what it deliberately does not do.
 
 ---
 
@@ -523,7 +525,110 @@ The RAG system retrieves from Level 1 and Level 2. Fine-tuning encodes Level 2 a
 
 ---
 
-## 11. Scaling: From a Laptop to a Building
+## 11. The Identity Module: Whose Routine Is This — Not "Who Are You"
+
+### A natural question, and why we slowed down before answering it
+
+Once a system can tell *whether* a room is occupied, the next question people usually ask is: can it tell *who* is in the room?
+
+The obvious technical answer is "add a camera and run face recognition" — or a microphone and run voice recognition. We deliberately did not do that, and it's worth explaining why, because the reasoning shapes everything else in this part of the system.
+
+A face is not just a way to unlock your phone. It is a unique, lifelong identifier — a "faceprint" — and the moment a system can compute one, it has created exactly the kind of data that privacy laws around the world (GDPR in Europe, Illinois's BIPA, the EU AI Act, and others) single out for the strictest protection: *biometric identifiers*. The same is true of a voiceprint. Even labeling the output "Person A" instead of a real name changes nothing about what was captured — the underlying fingerprint can still re-identify a real human being, no matter what name is printed next to it. Building that kind of system, even casually, even for people who live in the house and would consent, crosses from "smart home automation" into "biometric surveillance" — a line worth respecting on purpose, not blurring by accident.
+
+So we asked a different question instead: *is there a way to explore "who's probably here" that stays entirely within the kind of data the board already collects — motion, temperature, humidity, CO2 — and that only ever applies to people who choose, knowingly, to take part?*
+
+That's what the Identity module is.
+
+### The idea: recognize a routine, not a person
+
+Think about how you can often tell who just came in the front door without even looking up — a familiar rhythm of footsteps, the time of day they usually arrive, how long they typically linger before heading to the kitchen. You're not running facial recognition in your head. You're recognizing a *pattern of behavior* you've come to associate with that person — and you hold the guess loosely, ready to be corrected.
+
+That's the entire idea behind this module, made explicit and measurable. For each person who chooses to take part, the system learns three simple things from the existing motion sensor:
+
+- **What time of day are they usually active?** — a 24-hour activity profile ("mostly mornings and evenings on weekdays")
+- **How much of the time they're around are they actually moving?** — an overall activity level
+- **How long do their typical active stretches last?** — a few minutes of passing through, versus hours of working from home
+
+None of these require a camera. None of them are biometric. None of them can identify someone outside this one system, on this one device, to anyone who hasn't agreed to take part. We call this small bundle of statistics a **routine signature**, and it is the *only* thing this module ever stores about a person.
+
+### Step 1 — Registration: nothing happens without an explicit "yes"
+
+The system never builds a routine signature for someone in the background. Building one requires a person to actively start a **registration window** — in effect, saying "starting now, learn my pattern for the next hour." During that window, the system watches the motion sensor it already has, and when the window closes, it distills everything it observed into a routine signature, stored locally and tagged with the name the person chose for themselves and the moment they consented.
+
+```
+Person says: "Register me as 'Person A' for the next hour."
+
+The system observes (using a sensor that was already running):
+  09:02  motion detected
+  09:07  motion detected
+  09:08  motion detected
+  ...
+  10:00  window closes
+
+It distills this into a routine signature:
+  presence_ratio:           0.62   (active about 62% of the window)
+  hourly_activity:          [a 24-number histogram — peaks near 9 AM,
+                             quiet by 10 PM, ...]
+  mean_session_length_min:  8.5    (active stretches run about 8 minutes)
+
+Stored as:
+  { profile_id: "person_a_470f29", display_name: "Person A",
+    consent_at: "2026-06-01T09:00:00Z", signature: {...},
+    revoked_at: null }
+```
+
+That's the entire record: no image, no recording, no audio — three numbers and a histogram describing a pattern of comings and goings, attached to a name the person picked for their own profile.
+
+### Step 2 — Matching: an honest, confidence-scored guess
+
+From time to time, the system looks at roughly the last half hour of motion activity, builds the *same kind* of routine signature for that short recent window, and compares it against every registered signature using simple statistical similarity — not a language model, and not an AI "judgment call."
+
+This is a deliberate choice worth pausing on. Comparing two short numerical patterns for similarity is a job for ordinary arithmetic, not for a large language model — the same call we made for the confidence scores in Section 6, where a calculator beats a chatbot at "how similar are these two numbers": faster, cheaper, and easier to explain.
+
+The comparison produces a confidence score between 0 and 1, and the system reports it honestly either way:
+
+```
+Best match: "Person A" — confidence 0.92  →  "This looks like Person A's routine"
+Best match: "Person A" — confidence 0.38  →  "unknown occupant" (too uncertain to report)
+```
+
+If the live pattern doesn't resemble *any* registered routine closely enough, the system says so plainly — **"unknown occupant"** — rather than forcing a guess. That same honest "I don't recognize this pattern" is, not coincidentally, also exactly the signal that something — or someone — new has shown up.
+
+### Step 3 — Revocation: leaving is as complete as joining
+
+Anyone who registered can ask to be forgotten at any time, for any reason, no questions asked. And "forgotten" means exactly that: the system doesn't simply mark the profile inactive while quietly keeping the data around. It performs a **hard delete** — it removes the routine signature itself, *and* it walks back through the entire history of match results and removes every single record that ever referenced that person, so that no trace of them remains anywhere on the device.
+
+```
+Before revoking "Person A":
+  identity_profiles.jsonl:  [ Person A's signature ]
+  identity_matches.jsonl:   [ "Person A" @ 09:15, "Person A" @ 14:02,
+                              "unknown occupant" @ 18:40 ]
+
+After revoking "Person A":
+  identity_profiles.jsonl:  [ ]
+  identity_matches.jsonl:   [ "unknown occupant" @ 18:40 ]
+```
+
+We think this distinction — a real purge versus a flag that quietly leaves the underlying data intact — is the difference between a *consent* system and surveillance with extra steps. So it's the first thing revocation does, not an afterthought bolted on later.
+
+### Step 4 — It never leaves the device, and that's enforced, not just promised
+
+Section 8 described how the system periodically sends *labeled examples* — confirmed lessons about sensor patterns — to a separate machine for deeper training. It would be easy to assume identity data might get swept up in that process by accident. It can't: that export step reads from exactly one configured file path (the labeled-examples log) and nothing else. There is no step anywhere that scans "everything in the data folder" and ships it out, so routine signatures and match histories simply aren't reachable from that path — structurally, not by policy. The same files are also excluded from the project's version-control history, so they can never end up copied into a code repository either.
+
+### What this module deliberately does *not* do
+
+To be precise about the boundary we drew:
+
+- It does **not** use a camera, a microphone, or any biometric sensor of any kind.
+- It does **not** attempt to determine — and could not determine, even if asked — anything about a person's sex, age, health, or any other personal characteristic.
+- It does **not** produce anything that could identify a person to anyone outside this one system; "Person A" is a name someone chose for their own profile on their own device, not a durable identifier that follows them anywhere else.
+- It does **not** run, store, or learn anything about anyone who hasn't explicitly opted in. There is no passive "background profiling" mode — registration is the only door in, and it only opens from the inside.
+
+In short: the question this module answers is *"whose routine does this look like"* — a soft, probabilistic, revocable guess about a pattern someone chose to share — never *"who is this person."* That distinction is the whole point of the design.
+
+---
+
+## 12. Scaling: From a Laptop to a Building
 
 The system is designed to grow without requiring a rewrite. Every major component can be swapped for a larger equivalent by changing a single configuration file (`config/model.yaml`).
 
@@ -566,7 +671,7 @@ Once enough data and labeled examples have accumulated across many buildings, th
 
 ---
 
-## 12. Design Choices and Trade-offs
+## 13. Design Choices and Trade-offs
 
 | Decision | What we chose | What we gave up |
 |---|---|---|
@@ -584,7 +689,7 @@ Every "what we gave up" column is recoverable — the system is designed so that
 
 ---
 
-## 13. Open Research Questions
+## 14. Open Research Questions
 
 This project sits at the intersection of several active research areas. Here are the most interesting unsolved problems:
 
@@ -605,7 +710,7 @@ Even belief summaries can leak private information (if a building's belief is "o
 
 ---
 
-## 14. Conclusion
+## 15. Conclusion
 
 We have described a system that turns a stream of raw sensor readings into a continuously-improving understanding of a physical environment. The key ideas are:
 
@@ -621,7 +726,9 @@ We have described a system that turns a stream of raw sensor readings into a con
 
 6. **Designed to scale** — every component has a clear upgrade path, from a single laptop to a federated network of buildings.
 
-The result is a system that starts tiny, learns continuously, and gradually develops a genuine understanding of the physical world it inhabits — one sensor reading at a time.
+7. **Privacy by design, not by policy** — where the system ventures into anything related to the people who share a space with it, it deliberately limits itself to patterns its existing sensors already see, requires explicit opt-in before learning anything about a specific person, and makes "forgetting" mean a real, total purge — not a quiet flag.
+
+The result is a system that starts tiny, learns continuously, and gradually develops a genuine understanding of the physical world it inhabits — one sensor reading at a time, and never at the expense of the people living in that world.
 
 ---
 
@@ -631,6 +738,7 @@ The result is a system that starts tiny, learns continuously, and gradually deve
 |---|---|
 | Agent | An autonomous software component with a specific role, capable of using tools and making decisions |
 | Arduino UNO Q | A hybrid single-board computer combining a real-time STM32 microcontroller and a quad-core ARM Linux processor on one board |
+| Behavioral routine signature | A small bundle of statistics (how often someone is active, what times of day, how long their active stretches last) describing a person's pattern of presence — derived only from existing ambient sensors, never from cameras, microphones, or any biometric data |
 | Belief | A structured claim the model holds about the world, with an associated confidence score |
 | ChromaDB | An open-source vector database that runs in-process (no server needed) |
 | Concept drift | When the statistical properties of incoming data change over time, making old beliefs invalid |
@@ -640,11 +748,13 @@ The result is a system that starts tiny, learns continuously, and gradually deve
 | FedAvg | Federated Averaging — a technique for combining model updates from multiple devices without sharing raw data |
 | Fine-tuning | Updating a pre-trained model's weights on a new, smaller dataset |
 | Foundation model | A large model trained on broad data that serves as a starting point for specialized applications |
+| Hard delete (purge) | Removing a record completely — and every trace of it elsewhere — rather than just flagging it as inactive while quietly keeping the underlying data; the standard this project holds identity revocation to |
 | IoT | Internet of Things — physical devices that collect and transmit data over the internet |
 | Labeled example | A training record: an input paired with the correct output |
 | LoRA | Low-Rank Adaptation — a parameter-efficient fine-tuning method that only trains a small number of additional weights |
 | MQTT | Message Queuing Telemetry Transport — a lightweight protocol for sensor-to-server communication |
 | Ollama | A tool for running open-source language models locally on your own machine |
+| Opt-in registration | The consent mechanism by which a person knowingly and explicitly chooses to have the system learn their own behavioral routine signature — nothing is learned about anyone who hasn't taken this step |
 | Outlier | A sensor reading that falls outside the sensor's expected range, possibly indicating a fault |
 | Pydantic | A Python library for defining and validating data schemas |
 | RAG | Retrieval-Augmented Generation — answering questions by first retrieving relevant context, then generating a response |
@@ -700,5 +810,10 @@ ai-setup/
     │   ├── rag_confidence.py  RAG-derived confidence scoring
     │   └── ...             RAG chain, reasoner, belief tracker
     ├── exploration/        Hypothesis generation and experiments
+    ├── identity/           Opt-in routine registration & matching (Section 11)
+    │   ├── signature.py      Builds behavioral routine signatures from motion history
+    │   ├── matcher.py        Confidence-scored matching against registered routines
+    │   ├── registration.py   Register / revoke (hard delete) / list profiles
+    │   └── store.py          Local-only JSONL storage for profiles & match history
     └── api/                FastAPI HTTP layer
 ```

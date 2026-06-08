@@ -69,7 +69,13 @@ def _push_examples(client: httpx.Client, host: str, lines: list[str]) -> None:
 
 def push_if_ready(cfg: dict, client: httpx.Client) -> int:
     """Push a batch of new labeled examples once enough have accumulated.
-    Returns the number of lines pushed (0 if below the batch threshold)."""
+    Returns the number of lines pushed (0 if below the batch threshold).
+
+    Deliberately reads only `training.labeled_examples_path` — never glob
+    `data/*.jsonl`. data/identity_profiles.jsonl and data/identity_matches.jsonl
+    (see src/identity/store.py) hold the most sensitive data the board has
+    and must never become eligible for this path; this single hardcoded
+    config key is the structural guarantee that they can't."""
     sync_cfg = cfg["training"]["sync"]
     examples_path = Path(cfg["training"]["labeled_examples_path"])
     state = _load_json(DEFAULT_SYNC_STATE_PATH, {"last_pushed_line": 0})

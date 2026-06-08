@@ -219,6 +219,10 @@ __marimo__/
 
 # IoT World-Model runtime data — generated at runtime by the agents
 # (data/model_registry.json is a tracked seed file, not ignored here)
+# data/*.jsonl also covers identity_profiles.jsonl / identity_matches.jsonl —
+# the most sensitive files the board holds (consciously-registered routine
+# signatures + match history). They must never be committed or leave the
+# board — see src/identity/store.py and adapter_sync.py's push-path guardrail.
 data/chroma/
 data/timeseries.db
 data/*.jsonl
