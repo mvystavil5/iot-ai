@@ -1,6 +1,6 @@
 // Arduino UNO Q — STM32U585 MCU firmware (App Lab / RouterBridge edition)
 //
-// Exposes DHT22 + MQ-135 + HC-SR501 readings to the MPU (Debian) over the
+// Exposes DHT11 + MQ-135 + HC-SR501 readings to the MPU (Debian) over the
 // internal Arduino RouterBridge RPC. The Python half (python/main.py) calls
 // these provided functions, timestamps the readings, and POSTs them to the
 // on-board ingestion API.
@@ -17,7 +17,7 @@
 //   Arduino_LED_Matrix (onboard 12x8 matrix; confirm the exact lib on UNO Q)
 //
 // Wiring (unchanged from the serial firmware):
-//   DHT22    VCC -> 3.3 V   GND -> GND   DATA -> D4   (10 kOhm pull-up DATA->VCC)
+//   DHT11    VCC -> 3.3 V   GND -> GND   DATA -> D4   (10 kOhm pull-up DATA->VCC)
 //   MQ-135   VCC -> 5 V     GND -> GND   AOUT -> A0
 //   HC-SR501 VCC -> 5 V     GND -> GND   OUT  -> D7
 
@@ -31,7 +31,7 @@ static constexpr uint8_t PIN_DHT   = 4;
 static constexpr uint8_t PIN_MQ135 = A0;
 static constexpr uint8_t PIN_PIR   = 7;
 
-DHT dht(PIN_DHT, DHT22);
+DHT dht(PIN_DHT, DHT11);
 
 // --- RPC handlers exposed to the MPU --------------------------------------
 // The MPU invokes these by name via Bridge.call("read_temp"), etc.
@@ -74,7 +74,7 @@ void setup() {
   matrix.begin();
   pinMode(PIN_PIR, INPUT);
   dht.begin();
-  delay(2000);   // DHT22 needs ~2 s after power-on before its first valid read
+  delay(2000);   // DHT11 needs ~2 s after power-on before its first valid read
 }
 
 void loop() {

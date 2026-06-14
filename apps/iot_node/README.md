@@ -1,7 +1,7 @@
 # IoT World-Model Sensor Node — Arduino App Lab app
 
 App Lab packaging of the UNO Q sensor node. Bundles the MCU sketch (reads
-DHT22 / MQ-135 / HC-SR501) and the MPU Python loop (forwards readings to the
+DHT11 / MQ-135 / HC-SR501) and the MPU Python loop (forwards readings to the
 ingestion API) into one deployable App, using the **RouterBridge** RPC for
 MCU↔MPU transport instead of USB-serial JSON.
 

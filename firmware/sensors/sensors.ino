@@ -1,5 +1,5 @@
 // Arduino UNO Q — STM32U585 co-processor firmware
-// Reads DHT22 (temp + humidity), MQ-135 (air quality proxy), HC-SR501 (motion)
+// Reads DHT11 (temp + humidity), MQ-135 (air quality proxy), HC-SR501 (motion)
 // and sends newline-delimited JSON batches to the Debian Linux host over USB CDC serial.
 //
 // The Linux host (src/ingestion/serial_bridge.py) adds UTC timestamps and
@@ -10,7 +10,7 @@
 //   "ArduinoJson"        by Benoit Blanchon  (v6)
 //
 // Wiring:
-//   DHT22    VCC → 3.3 V    GND → GND    DATA → D4    (10 kΩ pull-up DATA→VCC)
+//   DHT11    VCC → 3.3 V    GND → GND    DATA → D4    (10 kΩ pull-up DATA→VCC)
 //   MQ-135   VCC → 5 V      GND → GND    AOUT → A0
 //   HC-SR501 VCC → 5 V      GND → GND    OUT  → D7
 
@@ -22,7 +22,7 @@ static constexpr uint8_t  PIN_MQ135  = A0;
 static constexpr uint8_t  PIN_PIR    = 7;
 static constexpr uint32_t INTERVAL_MS = 30000UL;  // periodic batch interval
 
-DHT dht(PIN_DHT, DHT22);
+DHT dht(PIN_DHT, DHT11);
 
 static int lastMotion = -1;  // track PIR state for immediate-send on change
 
@@ -69,7 +69,7 @@ void setup() {
 
   pinMode(PIN_PIR, INPUT);
   dht.begin();
-  delay(2000);       // DHT22 requires ~2 s after power-on before first valid read
+  delay(2000);       // DHT11 requires ~2 s after power-on before first valid read
 }
 
 void loop() {

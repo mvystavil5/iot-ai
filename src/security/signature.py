@@ -1,6 +1,6 @@
 """
 Occupancy-pattern signatures — pure aggregation over the ambient sensor
-history the board already collects (PIR motion, DHT22 temp/humidity, MQ-135
+history the board already collects (PIR motion, DHT11 temp/humidity, MQ-135
 CO2). No new hardware, no biometrics, no cameras/microphones.
 
 A signature answers "what does occupancy of this space normally look like" —

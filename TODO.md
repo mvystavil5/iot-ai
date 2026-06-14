@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-06-08 — Phase 1 ingestion/knowledge/model/exploration/security/wellness stacks + API wiring implemented and tested (security module redesigned from per-person identity matching to occupancy-baseline anomaly detection; wellness module added as a strictly opt-in, single-person personal-activity self-experiment)
+Last updated: 2026-06-13 — Sensor node repackaged as the `apps/iot_node/` Arduino App Lab app (RouterBridge MCU↔MPU transport, MPU loop POSTs `/telemetry`, LED gauge driven over the `set_matrix` RPC). This is now the **primary** Phase 1 sensor path; the USB-serial firmware + `serial_bridge.py` + `led_matrix.py` trio is demoted to a bench-only fallback, and the never-built standalone `wifi_bridge.py` is superseded by `apps/iot_node/python/main.py`. (Prior: 2026-06-08 — Phase 1 ingestion/knowledge/model/exploration/security/wellness stacks + API wiring implemented and tested.)
 
 ## Phase 1 — Local MVP (single machine, ~10 sensors)
 
@@ -10,7 +10,7 @@ Last updated: 2026-06-08 — Phase 1 ingestion/knowledge/model/exploration/secur
 - [x] `src/ingestion/storage.py` — SQLite time-series writer (schema: sensor_id, timestamp, value, unit, outlier, tags; composite PK dedupes silently)
 - [x] `src/ingestion/validator.py` — CLI wrapper: `python -m src.ingestion.validator --input <file> [--ingest]`
 - [x] `src/ingestion/simulator.py` — one-shot + continuous random-walk simulation, `--pipeline` bypass flag
-- [ ] `src/ingestion/mqtt_bridge.py` — subscribe to MQTT topic, forward to pipeline (Phase 1 uses HTTP POST only — see Hardware § wifi_bridge)
+- [ ] `src/ingestion/mqtt_bridge.py` — subscribe to MQTT topic, forward to pipeline (Phase 1 uses HTTP POST only — see Hardware § Arduino App Lab app)
 - [x] `tests/ingestion/test_pipeline.py` — 13 tests covering validate/normalize/store/emit + outlier/dedup paths
 
 ### Knowledge
@@ -45,7 +45,7 @@ biometric-/identification-surveillance territory: no cameras/microphones, no
 faceprints or voiceprints, no per-person profiles, no inference of protected
 attributes (sex/age/health). The system learns exactly *one* aggregate
 **occupancy baseline** — what normal activity timing/level/session-length
-looks like for the space (derived from the existing PIR/DHT22/CO2 sensors)
+looks like for the space (derived from the existing PIR/DHT11/CO2 sensors)
 — and compares live activity against it with an honestly-reported similarity
 score: "does this look like the usual pattern here", never "who is this
 person". A reset is a hard purge of the baseline + alert history.
@@ -153,26 +153,37 @@ ingestion API + ChromaDB + `smollm2:135m`/Ollama, sized to fit its 2–4 GB RAM 
 see `config/model.yaml`). Phase 2 migrates the knowledge/reasoning stack to a
 separate server (see `docs/installation.md` § Deployment for the migration
 checklist); the UNO Q then keeps doing sensor I/O + LED matrix monitoring and
-points `wifi_bridge.py --server` at the new host.
+points the App's `python/main.py` `API_BASE` at the new host.
 
-#### MCU firmware (`firmware/sensors/sensors.ino`) — **done** (USB-serial variant)
-- [x] Read DHT22 (D4), MQ-135 (A0), HC-SR501 (D7) every 30 s + immediate send on PIR state change;
+#### Arduino App Lab app (`apps/iot_node/`) — **done** (primary Phase 1 sensor path)
+Packages the sensor node as an App Lab app: App Lab builds + flashes the MCU
+sketch and runs the MPU Python half together over the RouterBridge RPC. This
+replaces the bench-only USB-serial trio for production and is the realization
+of the MCU↔MPU bridge transport that the standalone `wifi_bridge.py` was going
+to provide.
+- [x] `sketch/sketch.ino` — `Bridge.provide` handlers (`read_temp`/`read_humidity`/`read_co2`/`read_motion`) + `set_matrix`; owns the LED matrix via `ArduinoLEDMatrix::loadFrame`
+- [x] `python/main.py` — `Bridge.call`s the handlers every 30 s (+ immediate post on PIR state change), timestamps, `POST /telemetry` (127.0.0.1 Phase 1; edit `API_BASE` for Phase 2), pushes LED frames every 2 s
+- [x] `python/led_gauge.py` — pure-python CPU/mem → 3×uint32 frame packer (unit-testable; mirrors `led_matrix.py` semantics)
+- [x] `app.yaml` / `sketch.yaml` — App Lab manifest + FQBN `arduino:zephyr:unoq` + library pins
+- [x] `apps/iot_node/README.md` — deploy (App Lab GUI / `arduino-app-cli`), verify, and on-hardware confirmation notes
+- [ ] On real hardware: confirm RouterBridge symbol names (`Bridge.begin/provide/call`), library versions, return-value RPC support, and the LED-matrix frame bit order (see README § Notes)
+- [ ] `tests/apps/` (or reuse) — unit tests for `led_gauge.py` frame packing (none yet)
+
+#### MCU firmware (`firmware/sensors/sensors.ino`) — **done** (USB-serial bench fallback)
+- [x] Read DHT11 (D4), MQ-135 (A0), HC-SR501 (D7) every 30 s + immediate send on PIR state change;
       serialize to newline-delimited JSON arrays over USB CDC serial (pin map inlined as `constexpr`s — no separate `config.h`)
 - [x] Library deps documented in the file header: `DHT sensor library` + `Adafruit Unified Sensor`, `ArduinoJson` v6
-- [ ] Migrate to the Arduino-Bridge-RPC + Wi-Fi transport described in `CLAUDE.md`/`docs/architecture.md`
-      (`Bridge.put()`/`Bridge.get()`, SenML JSON, `firmware/arduino_uno_q/` path) — current firmware+bridge
-      is the USB-tethered bench variant; the Bridge/Wi-Fi path is the Phase 1 target and still needs `wifi_bridge.py` (below)
+- [x] Bridge-RPC transport now lives in the App Lab app above (`apps/iot_node/sketch/sketch.ino`); this serial sketch stays as the USB-tethered bench fallback
 
 #### MPU bridges (`src/ingestion/`)
 - [x] `serial_bridge.py` — **done**, tethered/bench variant: reads newline-delimited JSON from the MCU over
       USB CDC serial (`pyserial`), stamps UTC timestamps, validates sensor IDs against `config/sensors.yaml`,
       auto-reconnects on `SerialException`, posts to `POST /telemetry`. CLI:
       `python -m src.ingestion.serial_bridge [--port /dev/ttyACM0] [--baud 115200] [--api http://127.0.0.1:8000] [--debug]`
-- [ ] `wifi_bridge.py` — **Phase 1 target, not yet built**: receive frames from the MCU via Arduino Bridge RPC
-      (`Bridge.get()`) instead of raw serial, stamp UTC timestamps, validate sensor IDs against
-      `config/sensors.yaml`, HTTP POST SenML JSON to `POST /telemetry` over Wi-Fi 5
-      (Phase 1: `127.0.0.1`, same board; Phase 2: separate server host), auto-retry with exponential backoff.
-      CLI: `python wifi_bridge.py --server http://<host>:8000 [--dry-run] [--verbose]`
+- [x] ~~`wifi_bridge.py`~~ — **superseded by the App Lab app**: the MCU-Bridge-RPC + `POST /telemetry`
+      role this standalone script was going to fill is now done by `apps/iot_node/python/main.py`
+      (RouterBridge `Bridge.call`, UTC timestamps, sensor-ID validation, POST to the on-board API).
+      No separate `wifi_bridge.py` will be built; Phase 2's separate-server retarget is just editing `API_BASE`.
 - [ ] `tests/ingestion/test_serial_bridge.py` — mock serial port + mock HTTP server; verify timestamp injection, reconnect logic, JSON schema
 
 #### System load indicator (`src/ingestion/led_matrix.py`) — **done**
@@ -182,8 +193,8 @@ points `wifi_bridge.py --server` at the new host.
 - [x] `tests/ingestion/test_led_matrix.py` — frame-rendering unit tests
 
 #### Config & tests
-- [ ] `config/sensors.yaml` — entries already updated to `interface: wifi`; verify `wifi_standard: 802.11ac` field is consumed by `src/config.py` (currently only consumed by the not-yet-built `wifi_bridge.py`; `serial_bridge.py` reads its own `serial`/`baud` fields)
-- [ ] `tests/ingestion/test_wifi_bridge.py` — mock Bridge client + mock HTTP server; verify timestamp injection, retry logic, SenML schema (once `wifi_bridge.py` exists — see above)
+- [ ] `config/sensors.yaml` — entries marked `interface: wifi`; the App's `python/main.py` posts over HTTP regardless, so confirm whether the `interface`/`wifi_standard` fields are still consumed by anything (`src/config.py` / `serial_bridge.py`) or should be pruned now that `wifi_bridge.py` is gone
+- [ ] `tests/apps/test_led_gauge.py` — unit-test `led_gauge.py` frame packing (render + pack + word layout); the bridge-RPC path itself needs the board to exercise
 
 ### Infra / DX
 - [x] `src/ingestion/__init__.py`, `src/model/__init__.py`, `src/api/__init__.py`, `src/knowledge/__init__.py`, `src/exploration/__init__.py` — present

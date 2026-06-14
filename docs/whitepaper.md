@@ -73,7 +73,7 @@ The system is divided into five specialized **agents**. Each agent has a single 
 ```
 ┌──────────────────────────────────────┐
 │ IoT Sensors                          │
-│ DHT22 · MQ-135 · HC-SR501 PIR        │
+│ DHT11 · MQ-135 · HC-SR501 PIR        │
 └──────┬───────────────────────────────┘
        │  GPIO (digital / analog)
        ▼
@@ -130,17 +130,17 @@ The Ingestion Agent is the entry point for all sensor data. Its job is to make s
 
 ### How sensors reach the system
 
-On the Arduino UNO Q reference hardware, the physical sensors are not connected directly to the Linux computer — they are wired to a separate, low-power **microcontroller** (the STM32U585 co-processor built into the board). The microcontroller runs a small firmware program (`firmware/sensors/sensors.ino`) that reads the sensors and packages their values as a compact JSON message, which it sends over a USB serial connection to the Linux side.
+On the Arduino UNO Q reference hardware, the physical sensors are not connected directly to the Linux computer — they are wired to a separate, low-power **microcontroller** (the STM32U585 co-processor built into the board). The whole sensor node is packaged as an **Arduino App Lab app** (`apps/iot_node/`): App Lab builds and flashes the microcontroller sketch and starts the Linux-side Python loop together. The microcontroller sketch (`apps/iot_node/sketch/sketch.ino`) reads the sensors and exposes their values as **RouterBridge** RPC functions; the Linux half calls those functions over the board's internal MCU↔MPU link — no external wiring or USB cable to manage.
 
 ```
-DHT22 (temperature/humidity) ─── D4 ──┐
-MQ-135 (air quality)         ─── A0 ──┤── STM32 MCU ──► USB serial ──► Serial Bridge ──► /telemetry
+DHT11 (temperature/humidity) ─── D4 ──┐
+MQ-135 (air quality)         ─── A0 ──┤── STM32 MCU ──► RouterBridge RPC ──► MPU loop ──► /telemetry
 HC-SR501 (motion PIR)        ─── D7 ──┘
 ```
 
-A small Python script called the **serial bridge** (`src/ingestion/serial_bridge.py`) listens on that USB connection, adds a UTC timestamp to each batch (the microcontroller has no real-time clock), and forwards the readings to the ingestion API. This separation is intentional: the microcontroller handles the real-time, electrically noisy job of reading sensors reliably; the Linux side handles the computationally intensive AI pipeline. If the USB cable is unplugged and re-plugged, the bridge reconnects automatically.
+The Linux-side Python loop (`apps/iot_node/python/main.py`) calls the microcontroller's RPC functions, adds a UTC timestamp to each reading (the microcontroller has no real-time clock), and forwards them to the ingestion API. This separation is intentional: the microcontroller handles the real-time, electrically noisy job of reading sensors reliably; the Linux side handles the computationally intensive AI pipeline. (A USB-serial firmware plus a **serial bridge**, `src/ingestion/serial_bridge.py`, remain as a bench-only fallback for testing the pipeline over a tether without App Lab; it auto-reconnects if the cable is unplugged and re-plugged.)
 
-The bridge also sends motion events **immediately** when the PIR sensor changes state, rather than waiting for the next 30-second batch — so the AI side learns about occupancy changes in near real-time.
+The loop also sends motion events **immediately** when the PIR sensor changes state, rather than waiting for the next 30-second batch — so the AI side learns about occupancy changes in near real-time.
 
 ### The problem it solves
 
@@ -706,7 +706,7 @@ The system is designed to grow without requiring a rewrite. Every major componen
 | Component | Technology | Notes |
 |---|---|---|
 | Hardware | Arduino UNO Q | Quad Cortex-A53 @ 2 GHz, 4 GB RAM, Debian Linux |
-| Sensor acquisition | STM32U585 co-processor + serial bridge | Reads DHT22, MQ-135, HC-SR501 via GPIO; sends JSON over USB serial |
+| Sensor acquisition | STM32U585 co-processor + serial bridge | Reads DHT11, MQ-135, HC-SR501 via GPIO; sends JSON over USB serial |
 | LLM | Ollama + smollm2:135m | ~90 MB at 4-bit; fits in 4 GB alongside OS and pipeline |
 | Embeddings | nomic-embed-text via Ollama | 768-dimensional, runs locally |
 | Vector store | ChromaDB (in-process, file-backed) | ~500 K chunks |
@@ -847,9 +847,14 @@ ai-setup/
 ├── CLAUDE.md               Project guide for Claude Code
 ├── TODO.md                 Living task list
 ├── requirements.txt        Python dependencies
+├── apps/
+│   └── iot_node/           Arduino App Lab app — primary Phase 1 sensor node
+│       ├── app.yaml        App Lab manifest
+│       ├── sketch/         MCU sketch: RouterBridge read_* + set_matrix RPCs
+│       └── python/         MPU loop: Bridge.call → POST /telemetry + LED gauge
 ├── firmware/
 │   └── sensors/
-│       └── sensors.ino     STM32U585 Arduino sketch (sensor reading firmware)
+│       └── sensors.ino     STM32U585 sketch — bench-only USB-serial fallback
 ├── docs/
 │   ├── whitepaper.md       This document
 │   ├── architecture.md     Data flow and API reference
@@ -874,7 +879,7 @@ ai-setup/
 └── src/
     ├── config.py           Config loader
     ├── ingestion/
-    │   ├── serial_bridge.py  STM32 → ingestion API bridge
+    │   ├── serial_bridge.py  STM32 → ingestion API bridge (bench-only fallback)
     │   └── ...             Validation, normalization, storage
     ├── knowledge/          Embedding and vector store code
     ├── model/

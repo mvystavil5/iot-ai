@@ -12,11 +12,11 @@ develop against it, and how to deploy it.
 
 | # | Item | Spec | Qty | Notes |
 |---|---|---|---|---|
-| 1 | Arduino UNO Q | STM32U585 MCU + Qualcomm QRB2210 MPU, 2/4 GB LPDDR4x, 16/32 GB eMMC, Wi-Fi 5 (802.11ac), BT 5.1, onboard 12×8 LED matrix | 1 | **Phase 1 runs the entire stack on this one board** — firmware (MCU) + `wifi_bridge.py`, `led_matrix.py`, ingestion API, ChromaDB, and the LLM (MPU/Debian). No separate server needed. |
-| 2 | DHT22 temperature/humidity sensor | °C, %RH | 1 | Wired to MCU pin **D4**, needs 10 kΩ pull-up DATA→VCC |
+| 1 | Arduino UNO Q | STM32U585 MCU + Qualcomm QRB2210 MPU, 2/4 GB LPDDR4x, 16/32 GB eMMC, Wi-Fi 5 (802.11ac), BT 5.1, onboard 12×8 LED matrix | 1 | **Phase 1 runs the entire stack on this one board** — the `apps/iot_node/` App Lab app (MCU sketch + MPU sensor/LED-gauge loop) plus the ingestion API, ChromaDB, and the LLM (MPU/Debian). No separate server needed. |
+| 2 | DHT11 temperature/humidity sensor | °C, %RH | 1 | Wired to MCU pin **D4**, needs 10 kΩ pull-up DATA→VCC |
 | 3 | MQ-135 air-quality sensor | analog, ppm proxy (CO₂) | 1 | Wired to MCU pin **A0**; uncalibrated — see note below |
 | 4 | HC-SR501 PIR motion sensor | digital bool | 1 | Wired to MCU pin **D7** |
-| 5 | 10 kΩ resistor | pull-up for DHT22 DATA line | 1 | |
+| 5 | 10 kΩ resistor | pull-up for DHT11 DATA line | 1 | |
 | 6 | Breadboard + jumper wires | — | 1 set | |
 | 7 | USB-C cable | data-capable (not charge-only) | 1 | Powers the board and carries MCU↔host serial during development |
 | 8 | 5 V / 3 A USB-C power supply | — | 1 | For standalone deployment (not powered from a dev laptop) |
@@ -24,7 +24,7 @@ develop against it, and how to deploy it.
 **Wiring summary** (see `firmware/sensors/sensors.ino` header for full detail):
 
 ```
-DHT22    VCC → 3.3 V   GND → GND   DATA → D4   (10 kΩ pull-up DATA→VCC)
+DHT11    VCC → 3.3 V   GND → GND   DATA → D4   (10 kΩ pull-up DATA→VCC)
 MQ-135   VCC → 5 V     GND → GND   AOUT → A0
 HC-SR501 VCC → 5 V     GND → GND   OUT  → D7
 ```
@@ -120,33 +120,40 @@ firmware sends (`temp_01`, `humid_01`, `co2_01`, `motion_01` by default).
 
 ### 2.4 Connect the sensor node
 
-The Arduino UNO Q ships data over **Wi-Fi only** (no Ethernet). In the
-**Phase 1 on-device topology** (§4.1, the default), `wifi_bridge.py` simply
-points back at the API running on the same board:
+The sensor node is the **Arduino App Lab app** at `apps/iot_node/` — App Lab
+builds + flashes the MCU sketch and runs the MPU Python half together over the
+RouterBridge RPC. The Python half (`python/main.py`) calls the MCU's `read_*`
+handlers, timestamps each reading (the MCU has no RTC), validates sensor IDs
+against `config/sensors.yaml`, and POSTs to `POST /telemetry`. In Phase 1 the
+API runs on the same board, so it posts to `http://127.0.0.1:8000`; for the
+Phase 2 separate-server topology (§4.2), edit `API_BASE` in `python/main.py`.
 
-1. Power the UNO Q and confirm `wifi_bridge.py` is running on its Debian (MPU)
-   side — it reads frames from the MCU over Arduino Bridge RPC, timestamps
-   them (the MCU has no RTC), validates sensor IDs against
-   `config/sensors.yaml`, and POSTs SenML JSON to `POST /telemetry`.
-2. Point it at the local ingestion API (same board, Phase 1):
-   ```bash
-   python wifi_bridge.py --server http://127.0.0.1:8000
-   ```
-   For the Phase 2 separate-server topology (§4.2), point `--server` at that
-   host's address instead.
-
-For bench testing without the full wireless path, you can instead tether the
-UNO Q over USB-C and run the serial bridge directly:
+Deploy it (headless, from a dev machine on the same LAN):
 
 ```bash
-python -m src.ingestion.serial_bridge --port /dev/ttyACM0 --api http://127.0.0.1:8000
+scp -r apps/iot_node/* arduino@<UNO_Q_IP>:~/ArduinoApps/iot_node
+ssh arduino@<UNO_Q_IP> arduino-app-cli app start ~/ArduinoApps/iot_node
 ```
 
-### 2.5 Start the load indicator
+Or open `apps/iot_node/` in the App Lab desktop GUI and press **Run**. Full
+deploy/verify steps are in [`apps/iot_node/README.md`](../apps/iot_node/README.md).
 
-`led_matrix.py` drives the UNO Q's onboard 12×8 LED matrix as a live system
-gauge — left bar = CPU %, right bar = memory %, both filling bottom-up —
-sampled via `psutil`. Run it on the MPU alongside the bridge and API:
+> **Bench-only fallback (no App Lab):** flash the serial firmware from §2.1,
+> tether the UNO Q over USB-C, and run the serial bridge directly:
+>
+> ```bash
+> python -m src.ingestion.serial_bridge --port /dev/ttyACM0 --api http://127.0.0.1:8000
+> ```
+
+### 2.5 The load indicator
+
+The onboard 12×8 LED matrix runs as a live system gauge — left bar = CPU %,
+right bar = memory %, both filling bottom-up, sampled via `psutil`. Under the
+App Lab app this is built in: the MPU packs the frame (`python/led_gauge.py`)
+and the MCU sketch renders it via the `set_matrix` RPC — nothing extra to start.
+
+For the bench/USB fallback, run the standalone driver on the MPU alongside the
+serial bridge and API:
 
 ```bash
 python -m src.ingestion.led_matrix --interval 2.0
@@ -256,7 +263,7 @@ Phase 1 splits into two co-resident concerns on the board:
    > `config/agents.yaml`) and the file-backed ChromaDB store are not safe to
    > share across multiple processes.
 
-2. **The sensor node** — the MCU sketch (reads DHT22/MQ-135/PIR) plus the MPU
+2. **The sensor node** — the MCU sketch (reads DHT11/MQ-135/PIR) plus the MPU
    bridge loop (forwards readings to `POST /telemetry`) **and** the LED-matrix
    load gauge — deploys as the **Arduino App Lab app** at `apps/iot_node/`. App
    Lab builds + flashes the sketch and runs the Python half together over the
@@ -297,12 +304,10 @@ your signal), migrate the knowledge/reasoning stack to a separate server —
 2. Copy `data/` (SQLite DB, `data/chroma/`, `beliefs.jsonl`,
    `labeled_examples.jsonl`) to the new host.
 3. Start the API stack there (`uvicorn src.api.main:app ...`).
-4. On the UNO Q, repoint the bridge at the new host and keep the LED matrix
-   running locally as a board-health gauge:
-   ```bash
-   python wifi_bridge.py --server http://<server-host>:8000
-   python -m src.ingestion.led_matrix --interval 2.0
-   ```
+4. On the UNO Q, repoint the sensor node at the new host — edit `API_BASE` in
+   `apps/iot_node/python/main.py` to `http://<server-host>:8000` and restart
+   the App (`arduino-app-cli app start ~/ArduinoApps/iot_node`). The LED gauge
+   keeps running from the App as a board-health indicator.
 
 The config layer is designed so backend swaps within that migration require
 no code changes:
@@ -355,8 +360,8 @@ training:
     poll_interval_s: 1800    # adapter-registry poll cadence
 ```
 
-**3. Run the sync loop on the board**, alongside `wifi_bridge.py` and
-`led_matrix.py`:
+**3. Run the sync loop on the board**, alongside the `apps/iot_node/` App and
+the ingestion API:
 
 ```bash
 python -m src.model.adapter_sync              # continuous push+pull loop

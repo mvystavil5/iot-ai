@@ -167,7 +167,7 @@ To prevent the model from forgetting old knowledge when fine-tuning on new examp
 ### Phase 1: Local (current)
 - Arduino UNO Q: STM32U585 co-processor reads sensors; QRB2210 (quad Cortex-A53, 4 GB RAM) runs the full Python stack
 - `smollm2:135m` via Ollama — 135 M params, ~90 MB at 4-bit, fits comfortably alongside OS and ChromaDB
-- STM32 firmware (`firmware/sensors/sensors.ino`) sends newline-delimited JSON over USB CDC to the serial bridge (`src/ingestion/serial_bridge.py`) every 30 s, plus immediately on PIR state change
+- Sensor node ships as the `apps/iot_node/` Arduino App Lab app: the MCU sketch exposes `read_*` RouterBridge RPCs and the MPU half (`python/main.py`) calls them every 30 s (plus immediately on PIR state change) and POSTs to the ingestion API. A USB-serial firmware + `src/ingestion/serial_bridge.py` remain as a bench-only fallback.
 - 1–10 sensors, one user; ChromaDB in-process, SQLite time-series
 
 ### Phase 2: Multi-room / multi-building

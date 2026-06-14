@@ -23,7 +23,7 @@ sensors:
     expected_range: [-10, 50]
     reporting_interval_s: 30
     interface: wifi
-    hardware: { board: "Arduino UNO Q", model: DHT22, mcu_pin: D4 }
+    hardware: { board: "Arduino UNO Q", model: DHT11, mcu_pin: D4 }
 
   - id: humid_01
     name: "Living room humidity"
@@ -33,7 +33,7 @@ sensors:
     expected_range: [0, 100]
     reporting_interval_s: 30
     interface: wifi
-    hardware: { board: "Arduino UNO Q", model: DHT22, mcu_pin: D4 }   # same chip as temp_01
+    hardware: { board: "Arduino UNO Q", model: DHT11, mcu_pin: D4 }   # same chip as temp_01
 
   - id: co2_01
     name: "Living room CO2 (air quality proxy)"

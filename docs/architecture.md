@@ -3,18 +3,19 @@
 ## Deployment topology
 
 **Phase 1 (current target, ~10 sensors) runs the entire stack on the UNO Q
-itself** — no separate server. The QRB2210 MPU's Debian Linux side hosts
-`wifi_bridge.py`, `led_matrix.py`, the FastAPI ingestion/query API, SQLite,
-file-backed ChromaDB, and `smollm2:135m` served by Ollama, all within its
-2–4 GB RAM / 16–32 GB eMMC envelope. This collapses the "Sensors → MCU → MPU
-→ [HTTP over Wi-Fi] → server" hop in the diagram below into a single board:
-the MPU *is* the ingestion/knowledge/reasoning host, reachable at
-`http://<uno-q-host>:8000`.
+itself** — no separate server. The QRB2210 MPU's Debian Linux side hosts the
+`apps/iot_node/` **Arduino App Lab app** (MCU sketch + MPU sensor/LED-gauge
+loop over RouterBridge), the FastAPI ingestion/query API, SQLite, file-backed
+ChromaDB, and `smollm2:135m` served by Ollama, all within its 2–4 GB RAM /
+16–32 GB eMMC envelope. This collapses the "Sensors → MCU → MPU → [HTTP over
+Wi-Fi] → server" hop in the diagram below into a single board: the MPU *is*
+the ingestion/knowledge/reasoning host, and the App's Python half POSTs
+telemetry to `http://127.0.0.1:8000`.
 
 **Phase 2 (multi-room/multi-building, see `TODO.md`)** migrates the
 Knowledge Builder, Reasoner, Explorer, and Trainer agents to a separate
-server — `wifi_bridge.py` then simply points `--server` at that host instead
-of `127.0.0.1`. Because every backend in `config/model.yaml` is swappable
+server — the App's `python/main.py` then points `API_BASE` at that host
+instead of `127.0.0.1`. Because every backend in `config/model.yaml` is swappable
 without code changes (SQLite→TimescaleDB, ChromaDB→Qdrant), migrating means
 copying `data/` to the new host and repointing the bridge — see
 `docs/installation.md` § Deployment for the full migration checklist.
@@ -27,8 +28,8 @@ separate offline/cloud **training host** (a GPU box, or Modal/RunPod per the
 Phase 4 notes in `TODO.md`). The board's job in Phase 1 is just to
 *accumulate* labeled examples and *pull back* whatever adapter the host
 produces. Both legs of that exchange are **outbound-only HTTP from the
-board** — the same "may sit behind NAT" assumption that shapes
-`wifi_bridge.py` — so the board never needs to be reachable:
+board** — the same "may sit behind NAT" assumption that shapes the App's
+telemetry POST — so the board never needs to be reachable:
 
 ```
 UNO Q (board)                                   Training host (GPU/cloud)
@@ -72,30 +73,30 @@ the sync.
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   IoT Sensors                        │
-│  DHT22 (D4)    MQ-135 (A0)    HC-SR501 PIR (D7)     │
+│  DHT11 (D4)    MQ-135 (A0)    HC-SR501 PIR (D7)     │
 └───────────┬─────────────────────────────────────────┘
             │ GPIO — analog / digital
             ▼
 ┌─────────────────────────────────────────────────────┐
 │   STM32U585 MCU  (Cortex-M33, 160 MHz)  on UNO Q   │
-│  • firmware/arduino_uno_q/sensor_node.ino           │
-│  • Reads all sensors every 30 s                     │
-│  • Immediate send on PIR state change               │
-│  • Sends newline-delimited SenML JSON via RPC       │
-│    (Arduino Bridge library → internal USB CDC)      │
+│  • apps/iot_node/sketch/sketch.ino                  │
+│  • Exposes read_temp/humidity/co2/motion RPCs       │
+│  • set_matrix RPC renders the LED load frame        │
+│    (Arduino RouterBridge → internal USB CDC)        │
 └───────────┬─────────────────────────────────────────┘
-            │ Arduino Bridge RPC (internal USB CDC, on-board)
+            │ RouterBridge RPC (internal USB CDC, on-board)
             ▼
 ┌─────────────────────────────────────────────────────┐
 │  QRB2210 MPU  (quad Cortex-A53, 2 GHz)  on UNO Q   │
-│  Running: Debian Linux + src/ingestion/wifi_bridge.py│
-│  • Receives frames from MCU via Bridge library      │
+│  Running: Debian Linux + apps/iot_node/python/main.py│
+│  • Bridge.call's the MCU RPC handlers every 30 s    │
+│    (+ immediate post on PIR state change)           │
 │  • Adds UTC timestamps (MCU has no RTC)             │
 │  • Validates sensor IDs against config/sensors.yaml  │
-│  • POST /telemetry over Wi-Fi 5 (WCBN3536A module)  │
-│  • src/ingestion/led_matrix.py: 12×8 LED matrix     │
-│    shows live CPU % (left bar) / memory % (right    │
-│    bar) — bottom-up fill, sampled via psutil        │
+│  • POST /telemetry (127.0.0.1 in Phase 1)           │
+│  • python/led_gauge.py packs a 12×8 frame: live     │
+│    CPU % (left bar) / memory % (right bar),         │
+│    pushed to the MCU via the set_matrix RPC         │
 │                                                       │
 │  ── Phase 1: everything below also runs HERE ──────  │
 └───────────┬─────────────────────────────────────────┘
@@ -193,28 +194,28 @@ checkpoints/
 | MCU OS | Zephyr RTOS (Arduino Core) |
 | MPU OS | Debian Linux (upstream support) |
 | MCU↔MPU link | Arduino Bridge RPC over internal USB CDC |
-| Onboard display | 12×8 monochrome LED matrix — driven from the MPU side by `src/ingestion/led_matrix.py` as a CPU/memory load gauge (assumed parity with UNO R4 WiFi's matrix; confirm against your unit) |
+| Onboard display | 12×8 monochrome LED matrix — MCU-owned, driven as a CPU/memory load gauge: the App's `python/led_gauge.py` packs the frame and the sketch's `set_matrix` RPC renders it (`src/ingestion/led_matrix.py` for the bench fallback; assumed parity with UNO R4 WiFi's matrix; confirm against your unit) |
 | Expansion | Qwiic / Modulino connector, MIPI-CSI (2× camera), MIPI-DSI (display) |
 
 > **WiFi transport only.** No Ethernet shield. All telemetry leaves the board over Wi-Fi from the MPU side.
 
 ```
 Arduino UNO Q
-├── STM32U585 MCU  (Cortex-M33, 160 MHz)  ← runs sensor_node.ino
-│   ├── D4  ── DHT22 data pin  (10 kΩ pull-up to 3.3 V)
+├── STM32U585 MCU  (Cortex-M33, 160 MHz)  ← runs apps/iot_node/sketch/sketch.ino
+│   ├── D4  ── DHT11 data pin  (10 kΩ pull-up to 3.3 V)
 │   ├── A0  ── MQ-135 AOUT
 │   └── D7  ── HC-SR501 OUT
-└── QRB2210 MPU   (quad Cortex-A53, 2 GHz, 2–4 GB RAM)  ← Debian + wifi_bridge.py
-    ├── Arduino Bridge RPC      ← frames from MCU
-    ├── 12×8 LED matrix         ← led_matrix.py: live CPU %/mem % gauge
-    ├── WCBN3536A Wi-Fi 5       ← HTTP POST /telemetry
+└── QRB2210 MPU   (quad Cortex-A53, 2 GHz, 2–4 GB RAM)  ← Debian + apps/iot_node/python/main.py
+    ├── RouterBridge RPC        ← read_* / set_matrix calls to the MCU
+    ├── 12×8 LED matrix         ← led_gauge.py frame → set_matrix RPC: live CPU %/mem % gauge
+    ├── WCBN3536A Wi-Fi 5       ← HTTP POST /telemetry (127.0.0.1 in Phase 1)
     └── Phase 1: also hosts the ingestion API, SQLite, ChromaDB,
         and smollm2:135m (Ollama) — the whole stack, on one board
 ```
 
 | Sensor | Model | Measures | MCU Pin | Power |
 |---|---|---|---|---|
-| Temperature + humidity | DHT22 | °C, %RH | D4 | 3.3 V |
+| Temperature + humidity | DHT11 | °C, %RH | D4 | 3.3 V |
 | Air quality (CO₂ proxy) | MQ-135 | ppm (uncalibrated) | A0 | 5 V |
 | Motion | HC-SR501 PIR | bool | D7 | 5 V |
 
