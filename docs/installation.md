@@ -68,9 +68,16 @@ All Python dependencies are pinned in [`requirements.txt`](../requirements.txt).
 
 ### 2.1 Flash the MCU firmware
 
+The **primary** path is the Arduino App Lab app at `apps/iot_node/` (§4.1),
+which builds and flashes the MCU sketch and starts the MPU Python half
+together — you do not flash the MCU separately for that path.
+
+The standalone serial firmware below is a **bench-only fallback** for testing
+the pipeline over a USB tether without App Lab:
+
 1. Install the Arduino IDE (or `arduino-cli`) and add the UNO Q board package.
 2. Install required libraries via Library Manager: `DHT sensor library`,
-   `Adafruit Unified Sensor`, `ArduinoJson` (v6), `Arduino Bridge`.
+   `Adafruit Unified Sensor`, `ArduinoJson` (v6).
 3. Wire the sensors per §1.1.
 4. Open `firmware/sensors/sensors.ino`, select the UNO Q board/port, and upload.
 5. Confirm the MCU is emitting newline-delimited JSON batches at 115200 baud
@@ -232,25 +239,48 @@ for the full mapping of agent → file → role.
 The board's Debian Linux side hosts the FastAPI ingestion/query API, SQLite,
 file-backed ChromaDB (`./data/chroma`), and `smollm2:135m` via Ollama, all
 within its 2–4 GB RAM / 16–32 GB eMMC envelope (sized for exactly this in
-`config/model.yaml`). Run everything as supervised long-lived processes on
-the board itself:
+`config/model.yaml`).
 
-```bash
-# On the UNO Q (Debian/MPU side)
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1
-python wifi_bridge.py --server http://127.0.0.1:8000
-python -m src.ingestion.led_matrix --interval 2.0
-```
+Phase 1 splits into two co-resident concerns on the board:
 
-> Use a single worker — the in-process event bus
-> (`knowledge_chunks` / `store_updated` / `beliefs` topics, see
-> `config/agents.yaml`) and the file-backed ChromaDB store are not safe to
-> share across multiple processes.
+1. **The AI stack** — the FastAPI API, SQLite, ChromaDB and Ollama — runs as
+   supervised long-lived processes:
 
-`wifi_bridge.py` (or `serial_bridge.py` for tethered bench setups) and
-`led_matrix.py` auto-reconnect / degrade gracefully on transport or hardware
-issues (Wi-Fi drop, USB unplug, missing matrix binding) — supervise all three
-alongside `uvicorn` (e.g. via `systemd` units or a process manager).
+   ```bash
+   # On the UNO Q (Debian/MPU side)
+   uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1
+   ```
+
+   > Use a single worker — the in-process event bus
+   > (`knowledge_chunks` / `store_updated` / `beliefs` topics, see
+   > `config/agents.yaml`) and the file-backed ChromaDB store are not safe to
+   > share across multiple processes.
+
+2. **The sensor node** — the MCU sketch (reads DHT22/MQ-135/PIR) plus the MPU
+   bridge loop (forwards readings to `POST /telemetry`) **and** the LED-matrix
+   load gauge — deploys as the **Arduino App Lab app** at `apps/iot_node/`. App
+   Lab builds + flashes the sketch and runs the Python half together over the
+   RouterBridge; see [`apps/iot_node/README.md`](../apps/iot_node/README.md).
+
+   ```bash
+   # Headless deploy from a dev machine on the same LAN
+   scp -r apps/iot_node/* arduino@<UNO_Q_IP>:~/ArduinoApps/iot_node
+   ssh arduino@<UNO_Q_IP> arduino-app-cli app start ~/ArduinoApps/iot_node
+   ```
+
+   Or open `apps/iot_node/` in the App Lab desktop GUI and press **Run**.
+   Supervise the App alongside `uvicorn` (App Lab's daemon, or a `systemd`
+   unit invoking `arduino-app-cli app start`).
+
+> **Bench-only fallback (no App Lab):** with the serial firmware from §2.1
+> flashed, you can instead tether over USB-C and run the two standalone
+> scripts directly — they auto-reconnect / degrade gracefully on transport or
+> hardware issues:
+>
+> ```bash
+> python -m src.ingestion.serial_bridge --port /dev/ttyACM0 --api http://127.0.0.1:8000
+> python -m src.ingestion.led_matrix --interval 2.0
+> ```
 
 The 12×8 LED matrix doubles as your headroom gauge: watch it (left = CPU %,
 right = memory %) to judge when the board is approaching the limits that
@@ -366,8 +396,8 @@ install `torch+cu121`.
 
 - [ ] `data/chroma/`, `data/*.db`, `checkpoints/` excluded from git (`.gitignore`)
 - [ ] Ollama service running and models pulled (`smollm2:135m`, `nomic-embed-text`)
-- [ ] `wifi_bridge.py` (or `serial_bridge.py`) running as a supervised long-lived process
-- [ ] `led_matrix.py` running and showing live CPU/memory bars (or logging ASCII frames if no physical matrix binding)
+- [ ] `apps/iot_node` App Lab app started (`arduino-app-cli app start`) — sensor bridge + LED gauge — or, for bench-only, `serial_bridge.py` + `led_matrix.py` running as supervised processes
+- [ ] LED matrix showing live CPU/memory bars (left = CPU %, right = memory %)
 - [ ] `GET /health` returns OK and `GET /beliefs` shows recent entries
 - [ ] Backups of `data/beliefs.jsonl`, `data/labeled_examples.jsonl`, and `checkpoints/`
 - [ ] `config/agents.yaml: explorer.schedule_cron` matches your desired hypothesis-generation cadence

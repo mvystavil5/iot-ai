@@ -9,7 +9,11 @@
       "Bash(rm -rf src/identity tests/identity)",
       "Bash(mkdir -p \"D:\\\\iot-ai\\\\tests\\\\security\")",
       "Bash(mkdir -p src/wellness tests/wellness)",
-      "Bash(touch src/wellness/__init__.py tests/wellness/__init__.py)"
+      "Bash(touch src/wellness/__init__.py tests/wellness/__init__.py)",
+      "WebSearch",
+      "WebFetch(domain:shawnhymel.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

@@ -1,0 +1,19 @@
+profiles:
+  default:
+    fqbn: arduino:zephyr:unoq
+    platforms:
+      - platform: arduino:zephyr
+    libraries:
+      # RouterBridge transport stack (versions per the App Lab blink example —
+      # adjust to whatever `arduino-cli lib search` reports on your install).
+      - MsgPack (0.4.2)
+      - DebugLog (0.8.4)
+      - ArxContainer (0.7.0)
+      - ArxTypeTraits (0.3.1)
+      # Sensor drivers.
+      - DHT sensor library (1.4.6)
+      - Adafruit Unified Sensor (1.1.14)
+      # Onboard 12x8 LED matrix (load gauge). On the UNO R4 this ships with the
+      # core; confirm the UNO Q package name/version with `arduino-cli lib search`.
+      - Arduino_LED_Matrix (1.0.0)
+default_profile: default
