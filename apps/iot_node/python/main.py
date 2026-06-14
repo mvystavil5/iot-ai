@@ -69,9 +69,9 @@ def _update_gauge() -> None:
     """Push a CPU/memory load frame to the MCU-owned LED matrix over the Bridge."""
     cpu = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory().percent
-    w0, w1, w2 = led_gauge.gauge_words(cpu, mem)
+    w0h, w0l, w1h, w1l, w2h, w2l = led_gauge.gauge_words(cpu, mem)
     try:
-        Bridge.call("set_matrix", w0, w1, w2)   # noqa: F405
+        Bridge.call("set_matrix", w0h, w0l, w1h, w1l, w2h, w2l)   # noqa: F405
     except Exception as exc:  # noqa: BLE001  — never let the gauge break ingestion
         print(f"LED gauge update failed: {exc}")
 

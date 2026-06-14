@@ -1,6 +1,6 @@
 name: IoT World-Model Sensor Node
 description: "Reads DHT11 / MQ-135 / HC-SR501 on the MCU and feeds the on-board ingestion API over RouterBridge"
-icon: 🌡️
+icon: 🔆
 version: "0.1.0"
 # No exposed network ports: the Python half talks to the local ingestion API
 # (127.0.0.1:8000), which is supervised separately (see docs/installation.md §4.1).

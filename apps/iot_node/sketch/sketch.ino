@@ -55,11 +55,17 @@ int read_motion() {
   return digitalRead(PIN_PIR);    // 0 / 1
 }
 
-// Display a load frame pushed from the MPU. The three words are the 96-pixel
-// (12x8) bitmap packed by python/led_gauge.py, MSB-first, matching the layout
-// ArduinoLEDMatrix::loadFrame(const uint32_t[3]) expects.
-void set_matrix(uint32_t w0, uint32_t w1, uint32_t w2) {
-  uint32_t frame[3] = { w0, w1, w2 };
+// Display a load frame pushed from the MPU. Each 32-bit word is split into a
+// high and low uint16 by the Python side (led_gauge.py) to avoid RouterBridge
+// automatic type-narrowing that would mis-encode a uint32 as uint8/uint16.
+void set_matrix(uint16_t w0h, uint16_t w0l,
+                uint16_t w1h, uint16_t w1l,
+                uint16_t w2h, uint16_t w2l) {
+  uint32_t frame[3] = {
+    ((uint32_t)w0h << 16) | w0l,
+    ((uint32_t)w1h << 16) | w1l,
+    ((uint32_t)w2h << 16) | w2l,
+  };
   matrix.loadFrame(frame);
 }
 
